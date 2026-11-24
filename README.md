@@ -45,7 +45,8 @@ The free tier covers 50,000 monthly active users and 500 MB of database, far mor
 1. **Create a project** at [supabase.com](https://supabase.com) (free). Pick a region close to your team and save the database password somewhere safe.
 2. **Create the tables and rules.** In the Supabase dashboard open **SQL Editor → New query**, paste the whole of [`supabase/schema.sql`](supabase/schema.sql) and press **Run**. It is safe to run again after updates.
 3. **Auth settings.** Go to **Authentication → URL Configuration** and set **Site URL** to where the app will live, for example `https://roshan-054.github.io/Task-Management/`. Add the same URL (and `http://localhost:8000` for testing) under **Redirect URLs**.
-   - Under **Authentication → Providers → Email** you can leave **Confirm email** on (recommended) or turn it off so people can sign in straight after activating.
+   - Under **Authentication → Sign In / Providers → Email**, keep **Confirm email** ON. This stops someone from claiming an invited email they don't own.
+   - Keep **Allow anonymous sign-ins** OFF and leave all other providers (Google, GitHub, phone…) disabled.
 4. **Connect the app.** Open **Project Settings → API**, copy the **Project URL** and the **anon public** key, and paste them into [`js/config.js`](js/config.js):
 
    ```js
@@ -57,7 +58,7 @@ The free tier covers 50,000 monthly active users and 500 MB of database, far mor
    ```
 
    The anon key is designed to be public. What each user can read or change is decided by the security rules in the database, never by this key. **Never** put the `service_role` key in this file.
-5. **Create the first admin.** Open the app, choose **Activate your account**, and sign up. The very first account in an empty project automatically becomes the **admin**.
+5. **Create the first admin.** Open [`supabase/make-admin.sql`](supabase/make-admin.sql), replace `you@example.com` with your email, paste it into **SQL Editor** and press **Run**. Then open the app, choose **Activate your account** and sign up with that email. No one else can become admin.
 6. **Build your organisation.** As admin, go to **People & Teams**: add departments and teams, then **Add person** for each manager and member. Each person opens the app, chooses **Activate your account** and signs up with the email you added. Use **Copy invite** to get a ready-to-send message.
 
 ## Deploy to GitHub Pages
@@ -98,6 +99,14 @@ supabase/schema.sql        Tables, permission rules, notifications, KPI function
 .github/workflows/deploy.yml  GitHub Pages deployment
 ```
 
+## Security
+
+**About the key in `js/config.js`.** Every app that runs in a browser has to send its database key to the browser, so anyone can see it with "View source". Supabase designs the *publishable / anon* key for exactly this: on its own it grants nothing. All protection comes from the rules in `supabase/schema.sql`, which run inside the database and cannot be bypassed from the browser or by calling the API directly. Signed-out visitors cannot read any table or call any function.
+
+**Never** put the *secret* or *service_role* key in this repository. It bypasses every rule. If it is ever exposed, rotate it in **Project Settings → API Keys**.
+
+**Who can log in.** An account can only be created for an email an admin or manager added in People & Teams. This is checked by a database trigger on every sign-up path (the app, direct API calls, magic links, anonymous sign-in, OAuth), so it cannot be skipped. Each invitation works once. Deactivated people lose access to all data immediately.
+
 ## Permission rules (enforced in the database)
 
 - Everyone signed in can see the people directory, so managers can assign across teams.
@@ -108,11 +117,13 @@ supabase/schema.sql        Tables, permission rules, notifications, KPI function
 - Only admins can change someone's role, department, team or deactivate them. Everyone can edit their own name and title.
 - Managers can add members only to their own department. Admins can add anyone with any role.
 - KPI numbers for other people come from a database function that returns totals only, so managers see department performance without seeing tasks they did not assign.
-- Deactivated users cannot sign in to the app or access data.
+- Deactivated users cannot read or change any data.
 
 ## FAQ
 
 **Someone gets "This email has not been invited" when activating.** Add them under People & Teams first, with exactly that email.
+
+**Someone says their email is "already registered" but they never signed up.** Someone else may have tried to claim that invitation. Because email confirmation is on, they could not get in. Delete the user in **Authentication → Users**, remove and re-add the person in People & Teams, and ask them to activate again.
 
 **Can I remove someone?** Deactivate them in People & Teams (admin). To delete the login entirely, use Supabase **Authentication → Users**.
 

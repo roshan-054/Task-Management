@@ -117,24 +117,24 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- ---------------------------------------------------------------------
---  New account → profile (only invited emails may sign up).
---  The very first account in an empty project becomes the admin.
+--  New account → profile. ONLY emails that an admin or manager added to
+--  public.invitations can create an account. This runs inside the
+--  database, so it also blocks anyone calling the Supabase sign-up API
+--  directly, magic links, anonymous sign-ins and OAuth providers.
+--  The first admin is created with supabase/make-admin.sql.
 -- ---------------------------------------------------------------------
 create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
   inv public.invitations%rowtype;
-  first_user boolean;
 begin
-  select not exists (select 1 from public.profiles) into first_user;
-  select * into inv from public.invitations where lower(email) = lower(new.email);
+  if new.email is null or new.email = '' then
+    raise exception 'Sign-up requires an invited email address.';
+  end if;
+  select * into inv from public.invitations
+   where lower(email) = lower(new.email) and accepted_at is null;
 
-  if first_user then
-    insert into public.profiles (id, email, full_name, role)
-    values (new.id, lower(new.email),
-            coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
-            'admin');
-  elsif inv.email is not null then
+  if inv.email is not null then
     insert into public.profiles (id, email, full_name, title, role, department_id, team_id)
     values (new.id, lower(new.email),
             coalesce(nullif(inv.full_name, ''), new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
@@ -155,6 +155,7 @@ create trigger on_auth_user_created
 create or replace function public.guard_profile_update() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
+  if auth.uid() is null then return new; end if;   -- SQL editor / server side
   if not public.is_admin() then
     if new.role is distinct from old.role
        or new.department_id is distinct from old.department_id
@@ -180,6 +181,10 @@ create trigger profiles_guard before update on public.profiles
 create or replace function public.guard_task_write() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
+  if auth.uid() is null then                        -- SQL editor / server side
+    new.updated_at := now();
+    return new;
+  end if;
   if tg_op = 'INSERT' then
     new.created_by := auth.uid();
     if new.assigned_to <> auth.uid() and not public.is_manager_or_admin() then
@@ -326,12 +331,12 @@ alter table public.notifications enable row level security;
 -- Departments & teams: everyone signed in can read; admins manage.
 drop policy if exists dep_read  on public.departments;
 drop policy if exists dep_write on public.departments;
-create policy dep_read  on public.departments for select to authenticated using (true);
+create policy dep_read  on public.departments for select to authenticated using (public.my_role() is not null);
 create policy dep_write on public.departments for all    to authenticated using (public.is_admin()) with check (public.is_admin());
 
 drop policy if exists team_read  on public.teams;
 drop policy if exists team_write on public.teams;
-create policy team_read  on public.teams for select to authenticated using (true);
+create policy team_read  on public.teams for select to authenticated using (public.my_role() is not null);
 create policy team_write on public.teams for all    to authenticated using (public.is_admin()) with check (public.is_admin());
 
 -- Profiles: everyone signed in can see the directory (needed to assign
@@ -352,8 +357,10 @@ create policy inv_insert on public.invitations for insert to authenticated
   with check (
     invited_by = auth.uid() and (
       public.is_admin()
-      or (public.my_role() = 'manager' and role = 'member' and department_id = public.my_department())
+      or (public.my_role() = 'manager' and role = 'member' and department_id = public.my_department()
+          and (team_id is null or exists (select 1 from public.teams t where t.id = team_id and t.department_id = public.my_department())))
     )
+    and email = lower(email)
   );
 create policy inv_delete on public.invitations for delete to authenticated
   using (public.is_admin() or (invited_by = auth.uid() and accepted_at is null));
@@ -390,4 +397,12 @@ do $$ begin
   alter publication supabase_realtime add table public.tasks;
 exception when duplicate_object then null; end $$;
 
+-- ---------------------------------------------------------------------
+--  Function permissions: nothing is callable without signing in.
+-- ---------------------------------------------------------------------
+revoke execute on all functions in schema public from public, anon;
 grant execute on function public.kpi_stats(text, uuid) to authenticated;
+grant execute on function public.my_role(), public.my_department(), public.is_admin(), public.is_manager_or_admin() to authenticated;
+
+-- Anonymous (signed-out) visitors get no table access at all.
+revoke all on all tables in schema public from anon;
