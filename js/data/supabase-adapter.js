@@ -1,6 +1,6 @@
 // Supabase backend. All permission rules live in the database
 // (supabase/schema.sql), so this file only moves data around.
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.78.0/+esm';
 
 function unwrap({ data, error }) {
   if (error) throw new Error(error.message);
