@@ -406,3 +406,8 @@ grant execute on function public.my_role(), public.my_department(), public.is_ad
 
 -- Anonymous (signed-out) visitors get no table access at all.
 revoke all on all tables in schema public from anon;
+
+-- Signed-in users need table privileges; the row level security policies
+-- above then decide exactly which rows each person can see or change.
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
