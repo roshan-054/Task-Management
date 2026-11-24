@@ -9,6 +9,6 @@
 // ---------------------------------------------------------------
 export const CONFIG = {
   SUPABASE_URL: 'https://wilssgfmwmpyufevtjen.supabase.co',
-  SUPABASE_ANON_KEY: '',
+  SUPABASE_ANON_KEY: 'sb_publishable_Gj6HfrSAsLcU7pjuAqNYLQ_q73oKNpH',
   APP_NAME: 'TaskFlow',
 };
