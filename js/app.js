@@ -46,6 +46,10 @@ const timeAgo = (iso) => {
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
   return fmtDate(iso);
 };
+const fmtTime = (hhmm) => hhmm ? new Date(`2000-01-01T${hhmm}:00`).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
+// The moment a task is due: its date at its time (9:00 when no time is set).
+const dueMoment = (date, time) => date ? new Date(`${date}T${time || '09:00'}:00`) : null;
+const fmtDue = (t) => t.due_date ? fmtDate(t.due_date) + (t.due_time ? ', ' + fmtTime(t.due_time) : '') : '';
 const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 const ROLE_LABELS = { admin: 'Admin', manager: 'Manager', member: 'Team member' };
 const roleLabel = (r) => ROLE_LABELS[r] || r;
@@ -94,7 +98,7 @@ const icon = {
 const NOTE_STYLE = {
   completed: ['green', 'Task completed', 'check'], on_hold: ['orange', 'Task on hold', 'pause'], assigned: ['blue', 'New task for you', 'plus'],
   in_progress: ['blue', 'Task in progress', 'play'], not_started: ['gray', 'Task moved back', 'circle'],
-  tagged: ['purple', 'You were tagged', 'at'], blocked: ['red', 'Task blocked', 'alert'], remark: ['blue', 'New remark', 'chat'], resolved: ['green', 'Blocker resolved', 'check'],
+  tagged: ['purple', 'You were tagged', 'at'], reminder: ['orange', 'Reminder', 'bell'], blocked: ['red', 'Task blocked', 'alert'], remark: ['blue', 'New remark', 'chat'], resolved: ['green', 'Blocker resolved', 'check'],
 };
 const noteStyle = (type) => { const [tone, title, ic] = NOTE_STYLE[type] || NOTE_STYLE.assigned; return { tone, title, ic: icon[ic] }; };
 const statusIcon = { not_started: icon.circle, in_progress: icon.play, on_hold: icon.pause, completed: icon.check };
@@ -103,7 +107,7 @@ const statusIcon = { not_started: icon.circle, in_progress: icon.play, on_hold: 
 //  State
 // =====================================================================
 const state = {
-  me: null, profiles: [], departments: [], teams: [], tasks: [], notifications: [], invitations: [], remarks: [], platforms: [], todos: [], notes: [], personalError: '',
+  me: null, profiles: [], departments: [], teams: [], tasks: [], notifications: [], invitations: [], remarks: [], platforms: [], reminders: [], remindersReady: false, todos: [], notes: [], personalError: '',
   filter: { status: 'active', priority: 'all', platform: 'all', sort: 'due', q: '' },
   kpiSort: { key: 'score', dir: -1 },
 };
@@ -115,6 +119,8 @@ const byId = (list, id) => list.find((x) => x.id === id);
 const person = (id) => byId(state.profiles, id) || { id, full_name: 'Unknown', email: '' };
 const deptName = (id) => byId(state.departments, id)?.name || 'No department';
 const teamName = (id) => byId(state.teams, id)?.name || 'No team';
+// "Role · Team · Department", leaving out whatever is not set.
+const orgLine = (p, ...lead) => [...lead, byId(state.teams, p.team_id)?.name, byId(state.departments, p.department_id)?.name].filter(Boolean).join(' · ');
 const platformOf = (id) => (id ? byId(state.platforms, id) : null);
 // Options for a department's platform picker: active ones, plus the task's current one even if removed.
 const platformsFor = (deptId, keepId = null) => state.platforms
@@ -160,6 +166,25 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeSheet(); closePopover(); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && state.me) { e.preventDefault(); $('#search')?.focus(); }
 });
+// A proper "Are you sure?" dialog. Resolves true when confirmed.
+function confirmDialog({ title, body = '', confirm = 'Delete', tone = 'danger' } = {}) {
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'confirm-ov';
+    ov.innerHTML = `<div class="confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="cf-title">
+      <div class="confirm-ic tone-${tone === 'danger' ? 'red' : 'blue'}">${tone === 'danger' ? icon.trash(22) : icon.info(22)}</div>
+      <h3 id="cf-title">${esc(title)}</h3>${body ? `<p>${esc(body)}</p>` : ''}
+      <div class="confirm-actions"><button class="btn" data-no>Cancel</button><button class="btn ${tone === 'danger' ? 'danger solid' : 'primary'}" data-yes>${esc(confirm)}</button></div></div>`;
+    const done = (v) => { document.removeEventListener('keydown', onKey, true); ov.classList.add('closing'); setTimeout(() => ov.remove(), 150); resolve(v); };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopImmediatePropagation(); e.preventDefault(); done(false); } };
+    document.addEventListener('keydown', onKey, true);
+    ov.addEventListener('mousedown', (e) => { if (e.target === ov) done(false); });
+    $('[data-no]', ov).addEventListener('click', () => done(false));
+    $('[data-yes]', ov).addEventListener('click', () => done(true));
+    document.body.appendChild(ov);
+    setTimeout(() => $('[data-yes]', ov).focus(), 30);
+  });
+}
 const sheetHead = (title) => `<div class="sheet-head"><h2>${esc(title)}</h2><button class="icon-btn" data-close aria-label="Close">${icon.x()}</button></div>`;
 
 // =====================================================================
@@ -264,6 +289,7 @@ async function loadAll() {
   ]);
   Object.assign(state, { profiles, departments, teams, tasks, notifications, remarks, platforms });
   try { state.todos = await store.listTodos(); state.personalError = ''; } catch (e) { state.todos = []; state.personalError = e.message; }
+  await loadReminders();
   state.me = byId(profiles, state.me.id) || state.me;
 }
 let refreshTimer;
@@ -272,7 +298,7 @@ function scheduleRefresh(what = 'tasks') {
   refreshTimer = setTimeout(async () => {
     try {
       if (what === 'directory') await loadAll();
-      else { [state.tasks, state.remarks] = await Promise.all([store.listTasks(), store.listRemarks().catch(() => state.remarks)]); }
+      else { [state.tasks, state.remarks, state.reminders] = await Promise.all([store.listTasks(), store.listRemarks().catch(() => state.remarks), store.listReminders().catch(() => state.reminders)]); }
       if (!$('.overlay')) route(); else updateCounts();
     } catch (e) { console.warn(e); }
   }, 250);
@@ -290,6 +316,7 @@ async function boot() {
     renderShell();
     unsubscribe?.();
     unsubscribe = store.subscribe(me.id, onRealtime);
+    startReminderLoop();
     if (!location.hash || location.hash === '#') location.hash = '#/tasks'; else route();
   } catch (e) {
     console.error(e);
@@ -353,7 +380,7 @@ function renderShell() {
       <div class="spacer"></div>
       ${store.mode === 'demo' ? `<div style="padding:0 10px 8px"><span class="demo-banner">Demo mode</span></div>` : ''}
       <div class="me-row">
-        <div class="me-card" id="me-card" title="Your profile">${avatar(me)}<div class="who"><b>${esc(me.full_name)}</b><span>${esc(roleLabel(me.role))} · ${esc(teamName(me.team_id))}</span></div></div>
+        <div class="me-card" id="me-card" title="Your profile">${avatar(me)}<div class="who"><b>${esc(me.full_name)}</b><span>${esc([roleLabel(me.role), byId(state.teams, me.team_id)?.name].filter(Boolean).join(' · '))}</span></div></div>
         <button class="icon-btn logout-btn" id="logout-btn" aria-label="Log out" title="Log out">${icon.out(18)}</button>
       </div>
     </aside>
@@ -586,12 +613,8 @@ function renderTaskView() {
   $$('[data-card-del]').forEach((b) => {
     b.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!b.classList.contains('armed')) {
-        b.classList.add('armed');
-        clearTimeout(b._t); b._t = setTimeout(() => b.classList.remove('armed'), 3000);
-        return;
-      }
       const id = b.dataset.cardDel;
+      if (!await confirmDialog({ title: 'Delete this task?', body: `"${byId(state.tasks, id)?.title || ''}" and its remarks and history will be removed for everyone.` })) return;
       const card = b.closest('.tcard');
       card.classList.add('removing');
       try {
@@ -600,7 +623,7 @@ function renderTaskView() {
         state.remarks = state.remarks.filter((x) => x.task_id !== id);
         setTimeout(() => { renderTaskView(); updateCounts(); }, 220);
         toast('Task deleted', '', 'gray', icon.trash);
-      } catch (ex) { card.classList.remove('removing'); b.classList.remove('armed'); fail(ex); }
+      } catch (ex) { card.classList.remove('removing'); fail(ex); }
     });
   });
   $('#empty-new')?.addEventListener('click', () => openTaskEditor());
@@ -646,7 +669,7 @@ function dueInfo(t) {
   if (!t.due_date) return null;
   const DAY = 86400e3;
   const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
-  const due = new Date(t.due_date + 'T23:59:59');
+  const due = t.due_time ? dueMoment(t.due_date, t.due_time) : new Date(t.due_date + 'T23:59:59');
   const dueDay = startOfDay(t.due_date + 'T00:00:00');
   if (t.status === 'completed' && t.completed_at) {
     const diff = Math.round((dueDay - startOfDay(t.completed_at)) / DAY);
@@ -658,14 +681,17 @@ function dueInfo(t) {
   const created = new Date(t.created_at).getTime();
   const pct = Math.min(1, Math.max(0.04, (Date.now() - created) / Math.max(DAY / 4, due - created)));
   let state, label;
+  const at = t.due_time ? ' ' + fmtTime(t.due_time) : '';
   if (days < 0) { state = 'overdue'; label = `${-days}d overdue`; }
-  else if (days === 0) { state = 'today'; label = 'Due today'; }
+  else if (days === 0 && t.due_time && due < Date.now()) { state = 'overdue'; label = `Overdue since ${fmtTime(t.due_time)}`; }
+  else if (days === 0) { state = 'today'; label = 'Due today' + at; }
+  else if (days === 1 && at) { state = 'soon'; label = 'Tomorrow' + at; }
   else if (days === 1) { state = 'soon'; label = 'Due tomorrow'; }
   else if (days <= 3) { state = 'soon'; label = `${days} days left`; }
   else { state = 'ok'; label = `${days} days left`; }
   const hoursLeft = Math.max(0, Math.round((due - Date.now()) / 3600e3));
   return { state, pct: days < 0 ? 1 : pct, label,
-    tip: `Due ${new Date(t.due_date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} · ${days < 0 ? `${-days} day${days === -1 ? '' : 's'} late` : `${hoursLeft} h left`} · ${Math.round(pct * 100)}% of the time used` };
+    tip: `Due ${new Date(t.due_date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${at ? ' at' + at : ''} · ${days < 0 ? `${-days} day${days === -1 ? '' : 's'} late` : `${hoursLeft} h left`} · ${Math.round(pct * 100)}% of the time used` };
 }
 function dueChip(t) {
   const d = dueInfo(t);
@@ -701,7 +727,7 @@ function taskCard(t, i = 0) {
       ${platformChip(t)}
       ${dueChip(t)}
       ${locked ? `<span class="lock" title="Assigned by someone else. You can update the status only.">${icon.lock(13)}</span>` : ''}
-      ${canEditTask(t) ? `<button type="button" class="card-del" data-card-del="${esc(t.id)}" aria-label="Delete task" title="Delete task">${icon.trash(14)}<span>Delete?</span></button>` : ''}
+      ${canEditTask(t) ? `<button type="button" class="card-del" data-card-del="${esc(t.id)}" aria-label="Delete task" title="Delete task">${icon.trash(14)}</button>` : ''}
     </div>
     <h3 class="tcard-title">${esc(t.title)}</h3>
     ${t.description ? `<p class="task-desc">${esc(t.description)}</p>` : ''}
@@ -713,6 +739,7 @@ function taskCard(t, i = 0) {
     </div>
     <div class="tcard-foot">
       ${canStatus ? statusSelect(t) : `<span class="pill dot tone-${statusOf(t.status).tone}">${statusOf(t.status).label}</span>`}
+      ${nextReminder(t) ? `<span class="rem-count" title="Reminder ${esc(fmtDateTime(nextReminder(t).remind_at))}">${icon.bell(13)}</span>` : ''}
       ${remarksFor(t.id).length ? `<span class="remark-count" title="Remarks">${icon.chat(13)} ${remarksFor(t.id).length}</span>` : ''}
       ${t.completed_at ? `<span class="done-at" title="Completed ${esc(fmtDateTime(t.completed_at))}">${icon.check(14)} ${esc(fmtDateTime(t.completed_at))}</span>` : `<span class="small muted">Added ${esc(timeAgo(t.created_at))}</span>`}
     </div>
@@ -756,7 +783,7 @@ function renderRemarks(t, ov) {
           <select class="select sm" data-r-reason disabled>${Object.entries(REASONS).map(([k, v]) => `<option value="${k}" ${k === 'dependency' ? 'selected' : ''}>${v}</option>`).join('')}</select>
         </div>
         <div class="composer-row">
-          <select class="select sm" data-r-tag><option value="">Tag a person…</option>${people.map((p) => `<option value="${esc(p.id)}">${esc(p.full_name)} · ${esc(teamName(p.team_id))}</option>`).join('')}</select>
+          <select class="select sm" data-r-tag><option value="">Tag a person…</option>${people.map((p) => `<option value="${esc(p.id)}">${esc([p.full_name, byId(state.teams, p.team_id)?.name].filter(Boolean).join(' · '))}</option>`).join('')}</select>
           <label class="toggle"><input type="checkbox" data-r-mgr checked> <span>Also tag their manager</span></label>
         </div>
         <div class="tag-chips" data-r-chips></div>
@@ -868,12 +895,13 @@ function openTask(t) {
       ${t.description ? `<div style="white-space:pre-wrap">${esc(t.description)}</div>` : ''}
       <div class="detail-grid">
         <div class="detail"><div class="k">Priority</div><div class="v"><span class="pill tone-${p.tone}">${p.label}</span></div></div>
-        <div class="detail"><div class="k">Due date</div><div class="v ${overdue ? 'overdue' : ''}" style="${overdue ? 'color:var(--red)' : ''}">${t.due_date ? esc(fmtDate(t.due_date)) : 'No due date'}</div></div>
+        <div class="detail"><div class="k">Due date</div><div class="v ${overdue ? 'overdue' : ''}" style="${overdue ? 'color:var(--red)' : ''}">${t.due_date ? esc(fmtDue(t)) : 'No due date'}</div></div>
         ${t.platform_id ? `<div class="detail"><div class="k">Platform</div><div class="v">${platformChip(t)}</div></div>` : ''}
         <div class="detail"><div class="k">Assigned by</div><div class="v">${avatar(creator, 'sm')} ${esc(creator.full_name)}</div></div>
         <div class="detail"><div class="k">Assigned to</div><div class="v">${avatar(assignee, 'sm')} ${esc(assignee.full_name)}</div></div>
       </div>
       ${timingBlock(t)}
+      ${t.status !== 'completed' ? '<div data-reminders></div>' : ''}
       <div data-remarks></div>
       ${links.length ? `<div><div class="field"><label>Related links</label></div><div class="links">${links.map((l) => `<a class="link-chip" href="${esc(l.href)}" target="_blank" rel="noopener noreferrer">${icon.link(14)}<span>${esc(l.label || l.href)}</span>${icon.arrow(12)}</a>`).join('')}</div></div>` : ''}
       ${canStatus ? `<div class="field"><label>Work status</label>
@@ -882,6 +910,8 @@ function openTask(t) {
     </div>`, (ov) => {
     loadHistory(t, ov);
     renderRemarks(t, ov);
+    const rb = $('[data-reminders]', ov);
+    if (rb) mountReminders(rb, { task: t, getDue: () => ({ date: t.due_date, time: t.due_time }), live: true });
     $$('[data-set]', ov).forEach((b) => b.addEventListener('click', async () => {
       await changeStatus(t.id, b.dataset.set);
       closeSheet();
@@ -932,6 +962,11 @@ function openTaskEditor(t = null) {
         <div class="field"><label for="t-prio">Priority</label><select class="select" id="t-prio">${PRIORITIES.map((p) => `<option value="${p.id}" ${p.id === data.priority ? 'selected' : ''}>${p.label}</option>`).join('')}</select></div>
         <div class="field"><label for="t-due">Due date</label><input class="input" type="date" id="t-due" value="${esc(data.due_date || '')}"></div>
       </div>
+      <div class="row">
+        <div class="field"><label for="t-time">Time <span class="muted" style="font-weight:400">(optional)</span></label><input class="input" type="time" id="t-time" value="${esc(data.due_time || '')}"></div>
+        <div class="field"></div>
+      </div>
+      <div data-reminders></div>
       <div class="field"><label for="t-status">Work status</label><select class="select" id="t-status">${STATUSES.map((s) => `<option value="${s.id}" ${s.id === data.status ? 'selected' : ''}>${s.label}</option>`).join('')}</select></div>
       <div class="field"><label>Related links</label>
         <div id="links" style="display:grid;gap:8px">${(data.links || []).map(linkRow).join('')}</div>
@@ -961,14 +996,18 @@ function openTaskEditor(t = null) {
       $$('[data-plat]', box).forEach((b) => b.addEventListener('click', () => { chosenPlat = b.dataset.plat; renderPlat(); }));
     };
     renderPlat();
-    $('#t-assignee', ov).addEventListener('change', renderPlat);
+    const rem = mountReminders($('[data-reminders]', ov), {
+      task: t, getDue: () => ({ date: $('#t-due', ov).value, time: $('#t-time', ov).value }),
+      assigneeId: () => (isManager() ? $('#t-assignee', ov).value : state.me.id) || null,
+    });
+    $('#t-assignee', ov).addEventListener('change', () => { renderPlat(); rem.redraw(); });
+    ['#t-due', '#t-time'].forEach((sel) => $(sel, ov).addEventListener('change', () => rem.redraw()));
     const linksEl = $('#links', ov);
     const bindRm = () => $$('[data-rm]', linksEl).forEach((b) => { b.onclick = () => b.closest('.link-row').remove(); });
     bindRm();
     $('#add-link', ov).addEventListener('click', () => { linksEl.insertAdjacentHTML('beforeend', linkRow()); bindRm(); $$('[data-l="label"]', linksEl).pop().focus(); });
     $('#t-delete', ov)?.addEventListener('click', async (e) => {
-      const b = e.currentTarget;
-      if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.innerHTML = `${icon.trash(16)} Tap again to delete`; return; }
+      if (!await confirmDialog({ title: 'Delete this task?', body: `"${t.title}" and its remarks and history will be removed for everyone.` })) return;
       try { await store.deleteTask(t.id); state.tasks = state.tasks.filter((x) => x.id !== t.id); closeSheet(); route(); toast('Task deleted'); } catch (ex) { fail(ex); }
     });
     $('#task-form', ov).addEventListener('submit', async (e) => {
@@ -982,11 +1021,13 @@ function openTaskEditor(t = null) {
         assigned_to: isManager() ? $('#t-assignee', ov).value : state.me.id,
         priority: $('#t-prio', ov).value,
         due_date: $('#t-due', ov).value || null,
+        due_time: $('#t-due', ov).value ? ($('#t-time', ov).value || null) : null,
         status: $('#t-status', ov).value,
         links,
       };
       // Only send platform_id when platforms exist, so databases without migration 006 keep working.
       if (state.platforms.length || data.platform_id) payload.platform_id = chosenPlat || null;
+      if (!state.remindersReady && !payload.due_time) delete payload.due_time;  // database not updated yet
       if (!payload.title) { err.textContent = 'Give the task a title.'; return; }
       if (!payload.assigned_to) { err.textContent = 'Choose who this task is for.'; $('#t-assignee', ov).focus(); return; }
       if (bad) { err.textContent = `"${bad.url}" is not a valid link.`; return; }
@@ -995,10 +1036,12 @@ function openTaskEditor(t = null) {
         if (editing) {
           const u = await store.updateTask(t.id, payload);
           Object.assign(byId(state.tasks, t.id), u);
+          await rem.save(byId(state.tasks, t.id));
           toast('Task updated', '', 'blue', icon.check);
         } else {
           const n = await store.createTask(payload);
           if (!byId(state.tasks, n.id)) state.tasks.unshift(n);
+          await rem.save(n);
           const a = person(n.assigned_to);
           toast('Task created', n.assigned_to === state.me.id ? 'Added to your list.' : `Assigned to ${a.full_name}.`, 'green', icon.check);
           if (n.assigned_to !== state.me.id && location.hash === '#/tasks') { location.hash = '#/assigned'; closeSheet(); return; }
@@ -1037,7 +1080,7 @@ function kpiBody(k, p, hero = null) {
     <div class="card"><div class="profile-hero">
       ${hero ? `<div class="avatar lg team-av">${icon.team(34)}</div>` : avatar(p, 'lg')}
       <div class="info"><h2>${esc(hero ? hero.title : p.full_name)}</h2>
-        <div class="muted">${hero ? esc(hero.sub) : `${esc(p.title || roleLabel(p.role))} · ${esc(teamName(p.team_id))} · ${esc(deptName(p.department_id))}`}</div>
+        <div class="muted">${hero ? esc(hero.sub) : esc(orgLine(p, p.title || roleLabel(p.role)))}</div>
         <div style="margin-top:10px"><span class="pill tone-${k.band.tone}">${esc(k.band.label)}</span></div>
       </div>
       ${ring(k.score, k.band.tone)}
@@ -1136,7 +1179,7 @@ async function renderTeamKpi() {
         </tr></thead><tbody>
         ${rows.map((r) => `<tr data-user="${esc(r.user_id)}">
           <td><div class="person">${avatar(r.p)}<div><b>${esc(r.p.full_name)}</b><span>${esc(r.p.title || roleLabel(r.p.role))}</span></div></div></td>
-          <td>${esc(teamName(r.p.team_id))}${isAdmin() ? `<div class="small muted">${esc(deptName(r.p.department_id))}</div>` : ''}</td>
+          <td>${r.p.team_id ? esc(teamName(r.p.team_id)) : '<span class="muted">—</span>'}${isAdmin() ? `<div class="small muted">${esc(deptName(r.p.department_id))}</div>` : ''}</td>
           <td>${r.score === null ? '<span class="muted">—</span>' : `<span class="pill tone-${r.band.tone}">${r.score}</span>`}</td>
           <td><div style="display:flex;align-items:center;gap:8px"><div class="meter"><div style="width:${r.completionRate * 100}%"></div></div>${pct(r.completionRate)}</div></td>
           <td>${r.completed ? pct(r.onTimeRate) : '—'}</td>
@@ -1198,7 +1241,7 @@ async function renderPeople() {
     </div>
     ${pending.length ? `<div class="card" style="margin-top:16px"><h2>Waiting to activate</h2>
       ${pending.map((i) => `<div class="list-row"><div class="avatar" style="background:var(--gray)">${esc(initials(i.full_name || i.email))}</div>
-        <div class="grow"><b>${esc(i.full_name || i.email)}</b><span>${esc(i.email)} · ${esc(roleLabel(i.role))} · ${esc(teamName(i.team_id))}</span></div>
+        <div class="grow"><b>${esc(i.full_name || i.email)}</b><span>${esc([i.email, roleLabel(i.role), byId(state.teams, i.team_id)?.name].filter(Boolean).join(' · '))}</span></div>
         <button class="btn sm primary" data-activate="${esc(i.email)}">Activate now</button>
         <button class="btn sm" data-copy="${esc(i.email)}">Copy invite</button>
         <button class="icon-btn" data-del-inv="${esc(i.email)}" aria-label="Remove invitation">${icon.trash(16)}</button></div>`).join('')}
@@ -1250,7 +1293,8 @@ async function renderPeople() {
   $$('[data-edit-dept]').forEach((b) => inlineRename(b, (v) => store.renameDepartment(b.dataset.editDept, v)));
   $$('[data-edit-team]').forEach((b) => inlineRename(b, (v) => store.renameTeam(b.dataset.editTeam, v)));
   const confirmDel = (b, fn) => b.addEventListener('click', async () => {
-    if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.style.color = 'var(--red)'; b.title = 'Click again to delete'; toast('Click again to delete', 'People in it will be left without a team.', 'orange'); return; }
+    const what = b.dataset.delDept ? `department "${deptName(b.dataset.delDept)}"` : `team "${teamName(b.dataset.delTeam)}"`;
+    if (!await confirmDialog({ title: `Delete ${what}?`, body: 'People in it stay, but will no longer be in it.' })) return;
     try { await fn(); await loadAll(); renderPeople(); } catch (ex) { fail(ex); }
   });
   $$('[data-del-dept]').forEach((b) => confirmDel(b, () => store.deleteDepartment(b.dataset.delDept)));
@@ -1312,7 +1356,8 @@ function renderPlatforms() {
     input.addEventListener('blur', () => finish(true));
   }));
   $$('[data-plat-remove]').forEach((b) => b.addEventListener('click', async () => {
-    if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.classList.add('armed'); b.title = 'Click again to remove'; setTimeout(() => { b.dataset.confirm = ''; b.classList.remove('armed'); }, 3000); return; }
+    const pl = byId(state.platforms, b.dataset.platRemove);
+    if (!await confirmDialog({ title: `Remove "${pl?.name}"?`, body: 'It can no longer be picked. Tasks that already use it keep it, and you can restore it later.', confirm: 'Remove' })) return;
     try {
       const r = await store.removePlatform(b.dataset.platRemove); await reload();
       toast('Platform removed', r === 'archived' ? 'Older tasks keep it, but it can no longer be picked.' : '', 'gray', icon.trash);
@@ -1503,8 +1548,7 @@ function drawNotes(q = $('#note-search')?.value || '') {
     try { Object.assign(cur, await store.updateNote(cur.id, { pinned: !cur.pinned })); drawNotes(search.value); } catch (ex) { fail(ex); }
   });
   $('#note-del').addEventListener('click', async (e) => {
-    const b = e.currentTarget;
-    if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.classList.add('armed'); b.title = 'Click again to delete'; setTimeout(() => { b.dataset.confirm = ''; b.classList.remove('armed'); }, 3000); return; }
+    if (!await confirmDialog({ title: 'Delete this note?', body: `"${noteTitle(cur)}" will be deleted for good.` })) return;
     clearTimeout(timer); timer = null;
     try { await store.deleteNote(cur.id); state.notes = state.notes.filter((n) => n.id !== cur.id); noteSel = null; flushNote = async () => {}; drawNotes(search.value); toast('Note deleted', '', 'gray', icon.trash); } catch (ex) { fail(ex); }
   });
@@ -1512,6 +1556,109 @@ function drawNotes(q = $('#note-search')?.value || '') {
 let flushNote = async () => {};
 window.addEventListener('hashchange', () => { flushNote(); });
 window.addEventListener('beforeunload', () => { flushNote(); });
+
+// =====================================================================
+//  Reminders
+// =====================================================================
+const REMIND_OFFSETS = [[0, 'At due time'], [15, '15 min before'], [60, '1 hour before'], [1440, '1 day before']];
+async function loadReminders() {
+  state.reminders = await store.listReminders().catch(() => []);
+  // listReminders returns [] both when empty and before migration 009; tasks.due_time tells us which.
+  state.remindersReady = store.mode === 'demo' || state.tasks.some((t) => 'due_time' in t) || state.reminders.length > 0;
+}
+const myReminders = (taskId, userId = state.me.id) => state.reminders.filter((r) => r.task_id === taskId && r.user_id === userId);
+const nextReminder = (t) => myReminders(t.id).filter((r) => !r.sent_at && new Date(r.remind_at) > new Date()).sort((a, b) => a.remind_at.localeCompare(b.remind_at))[0];
+
+// Current selection for a person on a task: offsets + custom times.
+function reminderSelection(taskId, userId) {
+  const rs = taskId ? myReminders(taskId, userId) : [];
+  return { offsets: new Set(rs.filter((r) => r.offset_minutes != null).map((r) => r.offset_minutes)), customs: rs.filter((r) => r.offset_minutes == null).map((r) => r.remind_at) };
+}
+// Make the stored reminders for (task, person) match the selection.
+async function syncReminders(task, userId, sel) {
+  const due = dueMoment(task.due_date, task.due_time);
+  const want = [];
+  if (due) sel.offsets.forEach((m) => want.push({ offset_minutes: m, remind_at: new Date(due - m * 60e3).toISOString() }));
+  sel.customs.forEach((iso) => want.push({ offset_minutes: null, remind_at: new Date(iso).toISOString() }));
+  const have = myReminders(task.id, userId);
+  const same = (r, w) => (w.offset_minutes == null ? r.offset_minutes == null && Math.abs(new Date(r.remind_at) - new Date(w.remind_at)) < 60e3 : r.offset_minutes === w.offset_minutes);
+  for (const r of have) {
+    const w = want.find((x) => same(r, x));
+    if (!w) { await store.deleteReminder(r.id); state.reminders = state.reminders.filter((x) => x.id !== r.id); }
+    else if (Math.abs(new Date(r.remind_at) - new Date(w.remind_at)) >= 60e3) Object.assign(r, await store.updateReminder(r.id, { remind_at: w.remind_at }));
+  }
+  for (const w of want) {
+    if (have.some((r) => same(r, w))) continue;
+    if (new Date(w.remind_at) < Date.now() - 60e3) continue;   // already in the past
+    state.reminders.push(await store.addReminder({ task_id: task.id, user_id: userId, ...w }));
+  }
+}
+const askDesktopAlerts = () => { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {}); };
+
+// The reminders field. getDue() gives { date, time } from the form or task;
+// opts.assignee (id) shows "Also remind ..." for the task's creator.
+function mountReminders(box, { task, getDue, live = false, assigneeId = null }) {
+  const sel = reminderSelection(task?.id, state.me.id);
+  const aId0 = task ? task.assigned_to : null;
+  let alsoAssignee = !!(task && aId0 !== state.me.id && myReminders(task.id, aId0).some((r) => r.created_by === state.me.id));
+  let adding = false;
+  const draw = () => {
+    if (!state.remindersReady) { box.innerHTML = ''; return; }
+    const { date, time } = getDue();
+    const due = dueMoment(date, time);
+    const aId = typeof assigneeId === 'function' ? assigneeId() : assigneeId;
+    box.innerHTML = `<div class="field rem-field"><label>${icon.bell(14)} Remind me</label>
+      <div class="rem-chips">
+        ${REMIND_OFFSETS.map(([m, l]) => {
+          const at = due ? new Date(due - m * 60e3) : null;
+          const past = at && at < Date.now();
+          return `<button type="button" class="rem-chip ${sel.offsets.has(m) ? 'on' : ''}" data-off="${m}" ${!due || (past && !sel.offsets.has(m)) ? 'disabled' : ''} title="${at ? esc(fmtDateTime(at.toISOString())) : 'Set a due date first'}">${esc(l)}</button>`;
+        }).join('')}
+        ${sel.customs.map((iso, i) => `<span class="rem-chip on custom">${icon.bell(12)} ${esc(fmtDateTime(iso))}<button type="button" data-rm-custom="${i}" aria-label="Remove">${icon.x(12)}</button></span>`).join('')}
+        ${adding ? `<span class="rem-add"><input type="datetime-local" class="input" id="rem-dt"><button type="button" class="btn sm primary" id="rem-dt-ok">Add</button></span>`
+          : `<button type="button" class="rem-chip ghost" id="rem-custom">${icon.plus(12)} Pick date & time</button>`}
+      </div>
+      ${!due ? '<span class="small muted">Set a due date (and time) to use the quick options.</span>' : !time ? '<span class="small muted">No time set, so reminders count back from 9:00 AM on the due date.</span>' : ''}
+      ${aId && aId !== state.me.id ? `<label class="check-row"><input type="checkbox" id="rem-assignee" ${alsoAssignee ? 'checked' : ''}> Also remind ${esc(person(aId).full_name)}</label>` : ''}
+    </div>`;
+    $$('[data-off]', box).forEach((b) => b.addEventListener('click', async () => {
+      const m = Number(b.dataset.off);
+      sel.offsets.has(m) ? sel.offsets.delete(m) : sel.offsets.add(m);
+      askDesktopAlerts(); draw(); if (live) await save();
+    }));
+    $$('[data-rm-custom]', box).forEach((b) => b.addEventListener('click', async () => { sel.customs.splice(Number(b.dataset.rmCustom), 1); draw(); if (live) await save(); }));
+    $('#rem-custom', box)?.addEventListener('click', () => { adding = true; draw(); const i = $('#rem-dt', box); if (due) i.value = new Date(due - new Date().getTimezoneOffset() * 60e3).toISOString().slice(0, 16); i.focus(); });
+    $('#rem-dt-ok', box)?.addEventListener('click', async () => {
+      const v = $('#rem-dt', box).value; if (!v) return;
+      const d = new Date(v);
+      if (d < Date.now()) return toast('Pick a time in the future', '', 'orange', icon.bell);
+      sel.customs.push(d.toISOString()); adding = false; askDesktopAlerts(); draw(); if (live) await save();
+    });
+    $('#rem-assignee', box)?.addEventListener('change', (e) => { alsoAssignee = e.target.checked; });
+  };
+  const save = async (savedTask = task) => {
+    if (!state.remindersReady || !savedTask) return;
+    try {
+      await syncReminders(savedTask, state.me.id, sel);
+      const aId = savedTask.assigned_to;
+      if (aId !== state.me.id && savedTask.created_by === state.me.id) {
+        await syncReminders(savedTask, aId, alsoAssignee ? sel : { offsets: new Set(), customs: [] });
+      }
+      if (live) toast('Reminders saved', '', 'green', icon.bell);
+    } catch (ex) { fail(ex); }
+  };
+  draw();
+  return { redraw: draw, save };
+}
+
+let reminderTimer = null;
+function startReminderLoop() {
+  clearInterval(reminderTimer);
+  const tick = () => { if (state.me) store.fireMyReminders().catch(() => {}); };
+  tick();
+  reminderTimer = setInterval(tick, 30e3);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && state.me) store.fireMyReminders().catch(() => {}); });
 
 function genPassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -1744,7 +1891,7 @@ function openProfileSheet() {
   openSheet(`${sheetHead('Your profile')}
     <form id="me-form"><div class="sheet-body">
       <div style="display:flex;gap:14px;align-items:center">${avatar(me, 'lg')}<div><b style="font-size:18px">${esc(me.full_name)}</b><div class="muted small">${esc(me.email)}</div>
-        <div class="small muted">${esc(roleLabel(me.role))} · ${esc(teamName(me.team_id))} · ${esc(deptName(me.department_id))}</div></div></div>
+        <div class="small muted">${esc(orgLine(me, roleLabel(me.role)))}</div></div></div>
       <div class="row">
         <div class="field"><label>Full name</label><input class="input" id="me-name" value="${esc(me.full_name)}"></div>
         <div class="field"><label>Job title</label><input class="input" id="me-title" value="${esc(me.title)}"></div>

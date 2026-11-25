@@ -109,6 +109,7 @@ export class LocalAdapter {
     db.task_events ||= [];
     db.task_remarks ||= [];
     db.todos ||= [];
+    db.reminders ||= [];
     db.notes ||= [];
     if (!db.platforms) {   // demo data saved before platforms existed
       const ops = db.departments.find((d) => d.name === 'Operations') || db.departments[0];
@@ -503,6 +504,50 @@ export class LocalAdapter {
     Object.assign(n, patch, { user_id: me.id, updated_at: now() }); this.save(db); return clone(n);
   }
   async deleteNote(id) { const db = this.db; const me = this.me(db); db.notes = db.notes.filter((x) => !(x.id === id && x.user_id === me.id)); this.save(db); }
+
+  // ---------- reminders (mirrors migrations/009_reminders.sql) ----------
+  async listReminders() {
+    const me = this.me(this.db);
+    return clone(this.db.reminders.filter((r) => r.user_id === me.id || r.created_by === me.id)).sort((a, b) => a.remind_at.localeCompare(b.remind_at));
+  }
+  checkReminder(db, me, r) {
+    const t = db.tasks.find((x) => x.id === r.task_id);
+    if (!t || !this.canSee(me, t, db)) throw new Error('Task not found.');
+    if (r.user_id !== me.id && !(t.created_by === me.id && r.user_id === t.assigned_to) && me.role !== 'admin')
+      throw new Error('You can only set reminders for yourself, or for the person you assigned the task to.');
+  }
+  async addReminder(input) {
+    const db = this.db; const me = this.me(db);
+    const r = { id: uid(), user_id: me.id, offset_minutes: null, ...input, created_by: me.id, sent_at: null, created_at: now() };
+    this.checkReminder(db, me, r);
+    db.reminders.push(r); this.save(db); return clone(r);
+  }
+  async updateReminder(id, patch) {
+    const db = this.db; const me = this.me(db);
+    const r = db.reminders.find((x) => x.id === id && (x.user_id === me.id || x.created_by === me.id)); if (!r) throw new Error('Not found');
+    if (patch.remind_at && patch.remind_at !== r.remind_at) r.sent_at = null;
+    Object.assign(r, { remind_at: patch.remind_at ?? r.remind_at, offset_minutes: 'offset_minutes' in patch ? patch.offset_minutes : r.offset_minutes });
+    this.save(db); return clone(r);
+  }
+  async deleteReminder(id) {
+    const db = this.db; const me = this.me(db);
+    db.reminders = db.reminders.filter((x) => !(x.id === id && (x.user_id === me.id || x.created_by === me.id))); this.save(db);
+  }
+  async fireMyReminders() {
+    const db = this.db; const me = this.me(db);
+    const due = db.reminders.filter((r) => r.user_id === me.id && !r.sent_at && r.remind_at <= now());
+    const words = { 0: 'is due now', 15: 'is due in 15 minutes', 30: 'is due in 30 minutes', 60: 'is due in 1 hour', 120: 'is due in 2 hours', 1440: 'is due tomorrow at this time' };
+    const notes = [];
+    due.forEach((r) => {
+      r.sent_at = now();
+      const t = db.tasks.find((x) => x.id === r.task_id);
+      if (!t || t.status === 'completed') return;
+      notes.push(this.notify(db, me.id, t, 'reminder', `"${t.title}" ${r.offset_minutes == null ? '· reminder' : words[r.offset_minutes] || 'is coming up'}`));
+    });
+    if (due.length) this.save(db);
+    notes.forEach((n) => this.emit({ kind: 'notification', record: n }));
+    return notes.length;
+  }
 
   // ---------- KPI (mirrors kpi_stats() in schema.sql) ----------
   async kpiPlatforms(scope, target = null) { return (await this.kpiStats(scope, target, { byPlatform: true })).flat(); }

@@ -181,6 +181,25 @@ export class SupabaseAdapter {
   async updateNote(id, patch) { return this.personal(this.sb.from('notes').update(patch).eq('id', id).select().single()); }
   async deleteNote(id) { await this.personal(this.sb.from('notes').delete().eq('id', id)); }
 
+  // ---------- reminders (migration 009) ----------
+  async listReminders() {
+    const { data, error } = await this.sb.from('reminders').select('*').order('remind_at');
+    if (error) { console.warn('reminders:', error.message); return []; }
+    return data;
+  }
+  async addReminder(r) {
+    const { data, error } = await this.sb.from('reminders').insert(r).select().single();
+    if (error) throw new Error(/reminders|schema cache/i.test(error.message) && /exist|find/i.test(error.message) ? 'Run supabase/migrations/009_reminders.sql in Supabase first.' : error.message);
+    return data;
+  }
+  async updateReminder(id, patch) { return unwrap(await this.sb.from('reminders').update(patch).eq('id', id).select().single()); }
+  async deleteReminder(id) { unwrap(await this.sb.from('reminders').delete().eq('id', id)); }
+  async fireMyReminders() {
+    const { data, error } = await this.sb.rpc('fire_my_reminders');
+    if (error) return 0;
+    return data || 0;
+  }
+
   // ---------- notifications ----------
   async listNotifications() {
     return unwrap(await this.sb.from('notifications').select('*').order('created_at', { ascending: false }).limit(50));

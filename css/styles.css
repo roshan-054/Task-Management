@@ -676,3 +676,35 @@ body.is-dragging .col-empty { border-color: var(--accent); color: var(--accent);
 .select.is-set { border-color: var(--accent); color: var(--accent); background-color: var(--accent-soft); font-weight: 600; }
 .clear-filters { color: var(--red); }
 .clear-filters:hover { background: var(--red-soft); }
+
+/* v11: confirm dialog */
+.confirm-ov { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 16px; background: rgba(0,0,0,.32);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); animation: cf-in .15s ease; }
+.confirm-ov.closing { opacity: 0; transition: opacity .15s; }
+.confirm-box { width: 100%; max-width: 360px; background: var(--surface); border-radius: 20px; padding: 24px 22px 18px; text-align: center;
+  box-shadow: 0 24px 60px rgba(0,0,0,.25); animation: cf-pop .18s cubic-bezier(.2,.9,.3,1.2); }
+.confirm-box h3 { margin: 10px 0 6px; font-size: 17px; }
+.confirm-box p { margin: 0 0 18px; color: var(--text-2); font-size: 14px; line-height: 1.45; }
+.confirm-ic { width: 48px; height: 48px; border-radius: 50%; display: inline-grid; place-items: center; }
+.confirm-ic.tone-red { background: var(--red-soft); color: var(--red); }
+.confirm-ic.tone-blue { background: var(--accent-soft); color: var(--accent); }
+.confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.confirm-actions .btn { justify-content: center; }
+@keyframes cf-in { from { opacity: 0; } }
+@keyframes cf-pop { from { transform: scale(.92); opacity: 0; } }
+
+/* v11: reminders */
+.rem-field > label { display: inline-flex; align-items: center; gap: 6px; }
+.rem-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.rem-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .15s; }
+.rem-chip:hover:not(:disabled) { border-color: var(--orange); }
+.rem-chip.on { background: var(--orange); border-color: var(--orange); color: #fff; }
+.rem-chip:disabled { opacity: .45; cursor: not-allowed; }
+.rem-chip.ghost { border-style: dashed; color: var(--text-2); }
+.rem-chip.custom button { border: 0; background: transparent; color: inherit; display: inline-flex; padding: 0; cursor: pointer; }
+.rem-add { display: inline-flex; gap: 6px; align-items: center; }
+.rem-add .input { height: 34px; padding: 4px 10px; width: auto; }
+.check-row { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 4px; cursor: pointer; }
+.check-row input { width: 16px; height: 16px; accent-color: var(--accent); }
+.rem-count { display: inline-flex; color: var(--orange); }
