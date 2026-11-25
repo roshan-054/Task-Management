@@ -188,6 +188,18 @@ export class LocalAdapter {
     const db = this.db; this.requireAdmin(db);
     const t = { id: uid(), name, department_id }; db.teams.push(t); this.save(db); this.emit({ kind: 'directory' }); return t;
   }
+  async renameDepartment(id, name) {
+    const db = this.db; this.requireAdmin(db);
+    if (db.departments.some((d) => d.id !== id && d.name.toLowerCase() === name.toLowerCase())) throw new Error('That department already exists.');
+    const d = db.departments.find((x) => x.id === id); if (!d) throw new Error('Not found');
+    d.name = name; this.save(db); this.emit({ kind: 'directory' }); return clone(d);
+  }
+  async renameTeam(id, name) {
+    const db = this.db; this.requireAdmin(db);
+    const t = db.teams.find((x) => x.id === id); if (!t) throw new Error('Not found');
+    if (db.teams.some((x) => x.id !== id && x.department_id === t.department_id && x.name.toLowerCase() === name.toLowerCase())) throw new Error('That team already exists in this department.');
+    t.name = name; this.save(db); this.emit({ kind: 'directory' }); return clone(t);
+  }
   async deleteTeam(id) {
     const db = this.db; this.requireAdmin(db);
     db.teams = db.teams.filter((t) => t.id !== id);

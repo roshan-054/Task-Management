@@ -75,6 +75,7 @@ const icon = {
   at: (s) => I('<circle cx="12" cy="12" r="3.6"/><path d="M15.6 12v1.4a2.6 2.6 0 005.2 0V12a8.8 8.8 0 10-3.5 7"/>', s),
   alert: (s) => I('<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>', s),
   chat: (s) => I('<path d="M5 18.5V6.5A2.5 2.5 0 017.5 4h9A2.5 2.5 0 0119 6.5v7a2.5 2.5 0 01-2.5 2.5H9z"/>', s),
+  pencil: (s) => I('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>', s),
   pause: (s) => I('<circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/>', s),
   play: (s) => I('<circle cx="12" cy="12" r="9"/><path d="M10 8.5l5 3.5-5 3.5z"/>', s),
   circle: (s) => I('<circle cx="12" cy="12" r="9"/>', s),
@@ -1043,10 +1044,11 @@ async function renderPeople() {
         <form id="dept-form" style="display:flex;gap:8px;margin-bottom:14px"><input class="input" id="dept-name" placeholder="New department"><button class="btn">Add</button></form>
         ${state.departments.map((d) => `
           <div style="padding:10px 0;border-top:1px solid var(--border)">
-            <div style="display:flex;align-items:center;gap:8px"><b style="flex:1">${esc(d.name)}</b>
+            <div style="display:flex;align-items:center;gap:8px" data-rename-box><b style="flex:1" data-name>${esc(d.name)}</b>
+              <button class="icon-btn" data-edit-dept="${esc(d.id)}" data-current="${esc(d.name)}" aria-label="Rename department" title="Rename">${icon.pencil(16)}</button>
               <button class="icon-btn" data-del-dept="${esc(d.id)}" aria-label="Delete department">${icon.trash(16)}</button></div>
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0">
-              ${state.teams.filter((t) => t.department_id === d.id).map((t) => `<span class="chip" style="cursor:default">${esc(t.name)}<button class="icon-btn" style="width:20px;height:20px" data-del-team="${esc(t.id)}" aria-label="Delete team">${icon.x(12)}</button></span>`).join('')}
+              ${state.teams.filter((t) => t.department_id === d.id).map((t) => `<span class="chip" style="cursor:default" data-rename-box><span data-name>${esc(t.name)}</span><button class="icon-btn" style="width:20px;height:20px" data-edit-team="${esc(t.id)}" data-current="${esc(t.name)}" aria-label="Rename team" title="Rename">${icon.pencil(12)}</button><button class="icon-btn" style="width:20px;height:20px" data-del-team="${esc(t.id)}" aria-label="Delete team">${icon.x(12)}</button></span>`).join('')}
             </div>
             <form class="team-form" data-dept="${esc(d.id)}" style="display:flex;gap:8px"><input class="input" placeholder="New team in ${esc(d.name)}" style="padding:8px 12px"><button class="btn sm">Add team</button></form>
           </div>`).join('')}
@@ -1085,6 +1087,26 @@ async function renderPeople() {
     e.preventDefault(); const name = $('input', f).value.trim(); if (!name) return;
     try { await store.createTeam(name, f.dataset.dept); state.teams = await store.listTeams(); renderPeople(); } catch (ex) { fail(ex); }
   }));
+  const inlineRename = (b, save) => b.addEventListener('click', () => {
+    const box = b.closest('[data-rename-box]');
+    const name = $('[data-name]', box);
+    if ($('input', box)) return;
+    const input = document.createElement('input');
+    input.className = 'input rename-input'; input.value = b.dataset.current; input.setAttribute('aria-label', 'New name');
+    name.replaceWith(input); input.focus(); input.select();
+    let done = false;
+    const finish = async (ok) => {
+      if (done) return; done = true;
+      const v = input.value.trim();
+      if (!ok || !v || v === b.dataset.current) { input.replaceWith(name); return; }
+      try { await save(v); await loadAll(); renderPeople(); toast('Renamed', `Now called "${v}".`, 'green', icon.check); }
+      catch (ex) { input.replaceWith(name); fail(new Error(/duplicate key/i.test(ex.message) ? 'That name is already used.' : ex.message)); }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } if (e.key === 'Escape') { e.stopPropagation(); finish(false); } });
+    input.addEventListener('blur', () => finish(true));
+  });
+  $$('[data-edit-dept]').forEach((b) => inlineRename(b, (v) => store.renameDepartment(b.dataset.editDept, v)));
+  $$('[data-edit-team]').forEach((b) => inlineRename(b, (v) => store.renameTeam(b.dataset.editTeam, v)));
   const confirmDel = (b, fn) => b.addEventListener('click', async () => {
     if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.style.color = 'var(--red)'; b.title = 'Click again to delete'; toast('Click again to delete', 'People in it will be left without a team.', 'orange'); return; }
     try { await fn(); await loadAll(); renderPeople(); } catch (ex) { fail(ex); }

@@ -558,3 +558,4 @@ body.is-dragging .col-empty { border-color: var(--accent); color: var(--accent);
 .tcard { overflow: visible; }
 .tcard::before { border-radius: 16px 0 0 16px; }
 .tcard:hover, .tcard:focus-within { z-index: 6; } .column:hover { position: relative; z-index: 4; }
+.rename-input { flex: 1; padding: 6px 10px; font-size: 14px; min-width: 120px; } .chip .rename-input { width: 140px; flex: none; padding: 2px 8px; font-size: 13px; }

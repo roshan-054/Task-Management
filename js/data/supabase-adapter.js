@@ -68,6 +68,12 @@ export class SupabaseAdapter {
   async createTeam(name, department_id) {
     return unwrap(await this.sb.from('teams').insert({ name, department_id }).select().single());
   }
+  async renameDepartment(id, name) {
+    return unwrap(await this.sb.from('departments').update({ name }).eq('id', id).select().single());
+  }
+  async renameTeam(id, name) {
+    return unwrap(await this.sb.from('teams').update({ name }).eq('id', id).select().single());
+  }
   async deleteTeam(id) {
     unwrap(await this.sb.from('teams').delete().eq('id', id));
   }
