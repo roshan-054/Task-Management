@@ -536,7 +536,7 @@ export class LocalAdapter {
   async fireMyReminders() {
     const db = this.db; const me = this.me(db);
     const due = db.reminders.filter((r) => r.user_id === me.id && !r.sent_at && r.remind_at <= now());
-    const words = { 0: 'is due now', 15: 'is due in 15 minutes', 30: 'is due in 30 minutes', 60: 'is due in 1 hour', 120: 'is due in 2 hours', 1440: 'is due tomorrow at this time' };
+    const words = { 0: 'is due now', 5: 'is due in 5 minutes', 15: 'is due in 15 minutes', 30: 'is due in 30 minutes', 60: 'is due in 1 hour', 120: 'is due in 2 hours', 1440: 'is due tomorrow at this time' };
     const notes = [];
     due.forEach((r) => {
       r.sent_at = now();

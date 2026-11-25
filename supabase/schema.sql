@@ -1181,6 +1181,7 @@ begin
     continue when r.status = 'completed';
     msg := '"' || r.title || '" ' || case
       when r.offset_minutes = 0 then 'is due now'
+      when r.offset_minutes = 5 then 'is due in 5 minutes'
       when r.offset_minutes = 15 then 'is due in 15 minutes'
       when r.offset_minutes = 30 then 'is due in 30 minutes'
       when r.offset_minutes = 60 then 'is due in 1 hour'

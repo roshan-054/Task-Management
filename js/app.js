@@ -48,6 +48,7 @@ const timeAgo = (iso) => {
 };
 const fmtTime = (hhmm) => hhmm ? new Date(`2000-01-01T${hhmm}:00`).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
 // The moment a task is due: its date at its time (9:00 when no time is set).
+const localToday = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 10); };
 const dueMoment = (date, time) => date ? new Date(`${date}T${time || '09:00'}:00`) : null;
 const fmtDue = (t) => t.due_date ? fmtDate(t.due_date) + (t.due_time ? ', ' + fmtTime(t.due_time) : '') : '';
 const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
@@ -997,11 +998,15 @@ function openTaskEditor(t = null) {
     };
     renderPlat();
     const rem = mountReminders($('[data-reminders]', ov), {
-      task: t, getDue: () => ({ date: $('#t-due', ov).value, time: $('#t-time', ov).value }),
+      task: t, getDue: () => ({ date: $('#t-due', ov).value || ($('#t-time', ov).value ? localToday() : ''), time: $('#t-time', ov).value }),
       assigneeId: () => (isManager() ? $('#t-assignee', ov).value : state.me.id) || null,
     });
     $('#t-assignee', ov).addEventListener('change', () => { renderPlat(); rem.redraw(); });
-    ['#t-due', '#t-time'].forEach((sel) => $(sel, ov).addEventListener('change', () => rem.redraw()));
+    ['#t-due', '#t-time'].forEach((sel) => ['change', 'input'].forEach((ev) => $(sel, ov).addEventListener(ev, () => {
+      // Picking a time with no date means today.
+      if (sel === '#t-time' && $('#t-time', ov).value && !$('#t-due', ov).value) $('#t-due', ov).value = localToday();
+      rem.redraw();
+    })));
     const linksEl = $('#links', ov);
     const bindRm = () => $$('[data-rm]', linksEl).forEach((b) => { b.onclick = () => b.closest('.link-row').remove(); });
     bindRm();
@@ -1020,8 +1025,8 @@ function openTaskEditor(t = null) {
         description: $('#t-desc', ov).value.trim(),
         assigned_to: isManager() ? $('#t-assignee', ov).value : state.me.id,
         priority: $('#t-prio', ov).value,
-        due_date: $('#t-due', ov).value || null,
-        due_time: $('#t-due', ov).value ? ($('#t-time', ov).value || null) : null,
+        due_date: $('#t-due', ov).value || ($('#t-time', ov).value ? localToday() : null),
+        due_time: $('#t-time', ov).value || null,
         status: $('#t-status', ov).value,
         links,
       };
@@ -1560,7 +1565,7 @@ window.addEventListener('beforeunload', () => { flushNote(); });
 // =====================================================================
 //  Reminders
 // =====================================================================
-const REMIND_OFFSETS = [[0, 'At due time'], [15, '15 min before'], [60, '1 hour before'], [1440, '1 day before']];
+const REMIND_OFFSETS = [[0, 'At due time'], [5, '5 min before'], [15, '15 min before'], [60, '1 hour before'], [1440, '1 day before']];
 async function loadReminders() {
   state.reminders = await store.listReminders().catch(() => []);
   // listReminders returns [] both when empty and before migration 009; tasks.due_time tells us which.
@@ -1618,7 +1623,7 @@ function mountReminders(box, { task, getDue, live = false, assigneeId = null }) 
         ${adding ? `<span class="rem-add"><input type="datetime-local" class="input" id="rem-dt"><button type="button" class="btn sm primary" id="rem-dt-ok">Add</button></span>`
           : `<button type="button" class="rem-chip ghost" id="rem-custom">${icon.plus(12)} Pick date & time</button>`}
       </div>
-      ${!due ? '<span class="small muted">Set a due date (and time) to use the quick options.</span>' : !time ? '<span class="small muted">No time set, so reminders count back from 9:00 AM on the due date.</span>' : ''}
+      ${!due ? '<span class="small muted">Set a due date or time to use the quick options.</span>' : !time ? '<span class="small muted">No time set, so reminders count back from 9:00 AM on the due date.</span>' : ''}
       ${aId && aId !== state.me.id ? `<label class="check-row"><input type="checkbox" id="rem-assignee" ${alsoAssignee ? 'checked' : ''}> Also remind ${esc(person(aId).full_name)}</label>` : ''}
     </div>`;
     $$('[data-off]', box).forEach((b) => b.addEventListener('click', async () => {
