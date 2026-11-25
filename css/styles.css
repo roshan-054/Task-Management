@@ -530,3 +530,6 @@ body.is-dragging .col-empty { border-color: var(--accent); color: var(--accent);
 .tag-chip.static { padding: 2px 9px; }
 .tag-chip button { border: 0; background: none; color: inherit; cursor: pointer; display: grid; place-items: center; padding: 0; }
 .sheet-head { background: var(--glass-strong); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); z-index: 3; border-radius: 24px 24px 0 0; }
+.pw-box { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); }
+.pw-result { grid-column: 1 / -1; display: grid; gap: 6px; }
+.pw-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; padding: 6px 10px; border-radius: 8px; background: var(--surface-2); user-select: all; }

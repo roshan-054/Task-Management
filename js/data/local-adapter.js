@@ -25,6 +25,7 @@ function seed() {
   const u2 = P('priya@demo.app', 'Priya Nair', 'member', dOps, tSup, 'Support Specialist');
   const u3 = P('kabir@demo.app', 'Kabir Singh', 'member', dSales, tField, 'Account Executive');
   const u4 = P('sara@demo.app', 'Sara Khan', 'member', dSales, tInside, 'Inside Sales');
+  [u1, u2].forEach((u) => { u.manager_id = mOps.id; }); [u3, u4].forEach((u) => { u.manager_id = mSales.id; });
 
   const T = (title, by, to, status, priority, due, extra = {}) => {
     const created_at = extra.created_at || hoursAgo(24 * 6);
@@ -158,9 +159,10 @@ export class LocalAdapter {
     const db = this.db; const me = this.me(db);
     const p = db.profiles.find((x) => x.id === id);
     if (!p) throw new Error('Not found');
+    if (patch.manager_id && patch.manager_id === id) throw new Error('Someone cannot report to themselves.');
     if (me.role !== 'admin') {
       if (id !== me.id) throw new Error('You can only edit your own profile.');
-      for (const k of ['role', 'department_id', 'team_id', 'active', 'email'])
+      for (const k of ['role', 'department_id', 'team_id', 'manager_id', 'active', 'email'])
         if (k in patch && patch[k] !== p[k]) throw new Error('Only an admin can change role, department, team or status.');
     }
     Object.assign(p, patch); this.save(db); this.emit({ kind: 'directory' });
@@ -214,10 +216,17 @@ export class LocalAdapter {
     if (db.profiles.some((p) => p.email === e)) throw new Error('An account with this email already exists.');
     if (password.length < 6) throw new Error('Password should be at least 6 characters.');
     db.profiles.push({ id: uid(), email: e, full_name: inv.full_name || fullName || e.split('@')[0], title: inv.title || '',
-      role: inv.role, department_id: inv.department_id, team_id: inv.team_id, active: true, created_at: now(), password });
+      role: inv.role, department_id: inv.department_id, team_id: inv.team_id, manager_id: inv.manager_id || null, active: true, created_at: now(), password });
     inv.accepted_at = now();
     this.save(db); this.emit({ kind: 'directory' });
     return { needsConfirmation: false };
+  }
+  async adminResetPassword(userId, password) {
+    const db = this.db; this.requireAdmin(db);
+    if (password.length < 8) throw new Error('Use at least 8 characters.');
+    const p = db.profiles.find((x) => x.id === userId);
+    if (!p) throw new Error('Person not found.');
+    p.password = password; this.save(db);
   }
   async deleteInvitation(email) {
     const db = this.db; const me = this.me(db);
@@ -363,10 +372,10 @@ export class LocalAdapter {
   // ---------- KPI (mirrors kpi_stats() in schema.sql) ----------
   async kpiStats(scope, target = null) {
     const db = this.db; const me = this.me(db);
-    const mayView = (p) => p.id === me.id || me.role === 'admin' || (me.role === 'manager' && p.department_id === me.department_id);
+    const mayView = (p) => p.id === me.id || me.role === 'admin' || (me.role === 'manager' && (p.department_id === me.department_id || p.manager_id === me.id));
     const people = db.profiles.filter((p) => p.active && (
       (scope === 'me' && p.id === me.id) ||
-      (scope === 'department' && (me.role === 'admin' || (me.role === 'manager' && p.department_id === me.department_id))) ||
+      (scope === 'department' && (me.role === 'admin' || (me.role === 'manager' && (p.department_id === me.department_id || p.manager_id === me.id)))) ||
       (scope === 'user' && p.id === target && mayView(p))));
     const today = new Date().toISOString().slice(0, 10);
     const weekStart = (() => { const d = new Date(); const day = (d.getDay() + 6) % 7; d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - day); return d; })();

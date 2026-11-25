@@ -604,6 +604,7 @@ async function changeStatus(id, status) {
 
 // ---------- remarks ----------
 function managersOf(p) {
+  if (p.manager_id) { const m = person(p.manager_id); return m.active === false ? [] : [m]; }
   return state.profiles.filter((m) => m.active && m.role === 'manager' && m.department_id && m.department_id === p.department_id && m.id !== p.id);
 }
 function renderRemarks(t, ov) {
@@ -761,7 +762,7 @@ function assigneeOptions(selected) {
   const active = state.profiles.filter((p) => p.active);
   const groups = new Map();
   active.forEach((p) => {
-    const key = `${deptName(p.department_id)} · ${p.team_id ? teamName(p.team_id) : 'No team'}`;
+    const key = p.department_id ? (p.team_id ? `${deptName(p.department_id)} · ${teamName(p.team_id)}` : deptName(p.department_id)) : 'Other';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(p);
   });
@@ -967,7 +968,7 @@ async function renderTeamKpi() {
 // =====================================================================
 async function renderPeople() {
   try { state.invitations = await store.listInvitations(); } catch (e) { state.invitations = []; }
-  const visible = isAdmin() ? state.profiles : state.profiles.filter((p) => p.department_id === state.me.department_id);
+  const visible = isAdmin() ? state.profiles : state.profiles.filter((p) => p.department_id === state.me.department_id || p.manager_id === state.me.id);
   const depts = isAdmin() ? state.departments : state.departments.filter((d) => d.id === state.me.department_id);
   const pending = state.invitations.filter((i) => !i.accepted_at);
   const roleTone = { admin: 'purple', manager: 'blue', member: 'gray' };
@@ -1092,10 +1093,16 @@ function friendlyAuthError(ex) {
 
 function personRow(p, roleTone) {
   return `<div class="list-row click" data-person="${esc(p.id)}" style="${p.active ? '' : 'opacity:.5'}">${avatar(p)}
-    <div class="grow"><b>${esc(p.full_name)}${p.id === state.me.id ? ' (you)' : ''}</b><span>${esc(p.title || p.email)}</span></div>
+    <div class="grow"><b>${esc(p.full_name)}${p.id === state.me.id ? ' (you)' : ''}</b><span>${esc(p.title || p.email)}${reportsTo(p) ? ` · reports to ${esc(p.manager_id === state.me.id ? 'you' : reportsTo(p).full_name)}` : ''}</span></div>
     ${p.active ? '' : '<span class="pill tone-gray">Inactive</span>'}
     <span class="pill tone-${roleTone[p.role]}">${esc(roleLabel(p.role))}</span></div>`;
 }
+
+function managerOptions(selected, excludeId = null) {
+  const leads = state.profiles.filter((m) => m.active && ['manager', 'admin'].includes(m.role) && m.id !== excludeId);
+  return `<option value="">Nobody</option>` + leads.map((m) => `<option value="${esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${esc(m.full_name)}${m.id === state.me.id ? ' (me)' : ''} · ${esc(roleLabel(m.role))}</option>`).join('');
+}
+const reportsTo = (p) => p.manager_id ? person(p.manager_id) : null;
 
 function teamOptions(deptId, selected) {
   return `<option value="">No team</option>` + state.teams.filter((t) => !deptId || t.department_id === deptId)
@@ -1121,7 +1128,10 @@ function openInvite() {
           <option value="member">Team member</option>${admin ? '<option value="manager">Manager</option><option value="admin">Admin</option>' : ''}</select></div>
         <div class="field"><label>Department</label><select class="select" id="i-dept" ${admin ? '' : 'disabled'}>${deptOptions(dept)}</select></div>
       </div>
-      <div class="field"><label>Team</label><select class="select" id="i-team">${teamOptions(dept)}</select></div>
+      <div class="row">
+        <div class="field"><label>Team</label><select class="select" id="i-team">${teamOptions(dept)}</select></div>
+        <div class="field"><label>Reports to</label><select class="select" id="i-mgr">${managerOptions(state.me.id)}</select></div>
+      </div>
       <label class="check-row"><input type="checkbox" id="i-now" checked> <span><b>Activate account now</b><br><span class="small muted">Create their login immediately with a temporary password (copied for you to share).</span></span></label>
       <div class="field" id="i-pw-wrap"><label>Temporary password</label><input class="input" id="i-pw" autocomplete="off"></div>
       <div class="error" id="i-error"></div>
@@ -1138,6 +1148,7 @@ function openInvite() {
         await store.createInvitation({
           email, full_name: $('#i-name', ov).value.trim(), title: $('#i-title', ov).value.trim(),
           role: $('#i-role', ov).value, department_id: $('#i-dept', ov).value || null, team_id: $('#i-team', ov).value || null,
+          manager_id: $('#i-mgr', ov).value || null,
         });
         if ($('#i-now', ov).checked) {
           const pass = $('#i-pw', ov).value;
@@ -1163,13 +1174,40 @@ function openPersonEditor(p) {
         <div class="field"><label>Role</label><select class="select" id="p-role" ${p.id === state.me.id ? 'disabled' : ''}>${['member', 'manager', 'admin'].map((r) => `<option value="${r}" ${r === p.role ? 'selected' : ''} style="text-transform:capitalize">${roleLabel(r)}</option>`).join('')}</select></div>
         <div class="field"><label>Department</label><select class="select" id="p-dept">${deptOptions(p.department_id)}</select></div>
       </div>
-      <div class="field"><label>Team</label><select class="select" id="p-team">${teamOptions(p.department_id, p.team_id)}</select></div>
+      <div class="row">
+        <div class="field"><label>Team</label><select class="select" id="p-team">${teamOptions(p.department_id, p.team_id)}</select></div>
+        <div class="field"><label>Reports to</label><select class="select" id="p-mgr">${managerOptions(p.manager_id, p.id)}</select></div>
+      </div>
+      ${p.id === state.me.id ? '<div class="small muted">You can change your own department, team and manager here. Your role stays Admin so you cannot lock yourself out; admins already have every manager permission.</div>' : ''}
+      <div class="pw-box">
+        <div><b>Password</b><div class="small muted">Passwords are stored encrypted, so nobody (including admins) can see an existing one. You can set a new temporary password instead.</div></div>
+        <button type="button" class="btn sm" id="p-reset">Reset password</button>
+        <div class="pw-result hidden" id="p-pw-result"></div>
+      </div>
       <div class="small muted">${esc(p.email)}</div>
     </div><div class="sheet-foot">
       ${p.id !== state.me.id ? `<button type="button" class="btn ${p.active ? 'danger' : ''} left" id="p-active">${p.active ? 'Deactivate' : 'Reactivate'}</button>` : ''}
       <button type="button" class="btn" id="p-kpi">View KPIs</button>
       <button class="btn primary" type="submit">Save</button></div></form>`, (ov) => {
     $('#p-dept', ov).addEventListener('change', (e) => { $('#p-team', ov).innerHTML = teamOptions(e.target.value); });
+    $('#p-reset', ov).addEventListener('click', async (e) => {
+      const b = e.currentTarget;
+      if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.textContent = 'Click again to set a new password'; return; }
+      b.disabled = true;
+      const pw = genPassword();
+      try {
+        await store.adminResetPassword(p.id, pw);
+        const box = $('#p-pw-result', ov);
+        box.classList.remove('hidden');
+        box.innerHTML = `<div class="small muted">New temporary password for ${esc(p.full_name)} (shown once):</div>
+          <div style="display:flex;gap:8px;align-items:center"><code class="pw-code">${esc(pw)}</code><button type="button" class="btn sm primary" id="p-pw-copy">Copy login details</button></div>`;
+        $('#p-pw-copy', ov).addEventListener('click', async () => {
+          const text = `${CONFIG.APP_NAME}: ${location.origin + location.pathname}\nEmail: ${p.email}\nTemporary password: ${pw}\nPlease change it after signing in (click your name, bottom left).`;
+          try { await navigator.clipboard.writeText(text); toast('Copied', 'Share it with them privately.', 'green', icon.check); } catch { prompt('Copy this', text); }
+        });
+        b.textContent = 'Password reset';
+      } catch (ex) { b.disabled = false; b.dataset.confirm = ''; b.textContent = 'Reset password'; fail(new Error(/admin_reset_password|function/i.test(ex.message) && !/Only an admin/.test(ex.message) ? 'Run supabase/migrations/004_people_admin.sql in Supabase first.' : ex.message)); }
+    });
     $('#p-kpi', ov).addEventListener('click', () => { closeSheet(); location.hash = '#/kpi/' + encodeURIComponent(p.id); });
     $('#p-active', ov)?.addEventListener('click', async () => {
       try { await store.updateProfile(p.id, { active: !p.active }); await loadAll(); closeSheet(); renderPeople(); } catch (ex) { fail(ex); }
@@ -1177,7 +1215,7 @@ function openPersonEditor(p) {
     $('#p-form', ov).addEventListener('submit', async (e) => {
       e.preventDefault();
       const patch = { full_name: $('#p-name', ov).value.trim(), title: $('#p-title', ov).value.trim(),
-        department_id: $('#p-dept', ov).value || null, team_id: $('#p-team', ov).value || null };
+        department_id: $('#p-dept', ov).value || null, team_id: $('#p-team', ov).value || null, manager_id: $('#p-mgr', ov).value || null };
       if (p.id !== state.me.id) patch.role = $('#p-role', ov).value;
       try { await store.updateProfile(p.id, patch); await loadAll(); closeSheet(); renderPeople(); toast('Saved', '', 'green', icon.check); } catch (ex) { fail(ex); }
     });

@@ -93,6 +93,9 @@ export class SupabaseAdapter {
     if (data.session) await tmp.auth.signOut();
     return { needsConfirmation: !data.session };
   }
+  async adminResetPassword(userId, password) {
+    unwrap(await this.sb.rpc('admin_reset_password', { p_user: userId, p_password: password }));
+  }
   async deleteInvitation(email) {
     unwrap(await this.sb.from('invitations').delete().eq('email', email));
   }

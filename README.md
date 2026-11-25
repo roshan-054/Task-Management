@@ -73,6 +73,7 @@ When a new version adds database changes, run the matching file in `supabase/mig
 |---|---|
 | `002_task_history.sql` | `tasks.started_at`, the `task_events` status history table, and backfills existing tasks |
 | `003_task_remarks.sql` | `task_remarks` (remarks, blockers, tagged people), notifications for them, and read access for tagged people |
+| `004_people_admin.sql` | `profiles.manager_id` ("Reports to"), managers see KPIs of their direct reports, admin **Reset password** |
 
 **Activating people from the panel with "Confirm email" on:** Supabase still sends them a confirmation email, and they must click it before their first sign-in. Supabase's built-in email service only sends a few emails per hour; if you add many people at once, set up custom SMTP under **Authentication → Emails**, or turn **Confirm email** off and use **Activate account now** when you add each person (so no invitation is left waiting for someone else to claim).
 
@@ -141,6 +142,8 @@ supabase/migrations/       Database updates for existing installs
 **Someone gets "This email has not been invited" when activating.** Add them under People & Teams first, with exactly that email.
 
 **Someone says their email is "already registered" but they never signed up.** Someone else may have tried to claim that invitation. Because email confirmation is on, they could not get in. Delete the user in **Authentication → Users**, remove and re-add the person in People & Teams, and ask them to activate again.
+
+**Someone forgot their password.** An admin opens them in People & Teams and clicks **Reset password**. A new temporary password is shown once to copy and share. Existing passwords are stored encrypted and can never be viewed.
 
 **Can I remove someone?** Deactivate them in People & Teams (admin). To delete the login entirely, use Supabase **Authentication → Users**.
 
