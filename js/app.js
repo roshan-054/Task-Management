@@ -1,3 +1,4 @@
+import { chime, isMuted, setMuted } from './sound.js';
 import { createDataStore } from './data/index.js';
 import { CONFIG } from './config.js';
 import { computeKpi, formatHours } from './kpi.js';
@@ -59,6 +60,8 @@ const icon = {
   chart: (s) => I('<path d="M5 20V10M12 20V4M19 20v-7"/>', s),
   team: (s) => I('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3 2.8-4.8 5.5-4.8s4.9 1.8 5.5 4.8"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.3c2.3.2 3.9 1.8 4.5 4.2"/>', s),
   people: (s) => I('<circle cx="12" cy="8" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/>', s),
+  sound: (s) => I('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/>', s),
+  muted: (s) => I('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>', s),
   bell: (s) => I('<path d="M6 16V11a6 6 0 1112 0v5l1.5 2h-15L6 16z"/><path d="M10 20.5a2.2 2.2 0 004 0"/>', s),
   plus: (s) => I('<path d="M12 5v14M5 12h14"/>', s),
   search: (s) => I('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>', s),
@@ -290,6 +293,7 @@ function onRealtime(msg) {
     state.notifications.unshift(n);
     const { tone, title, ic } = noteStyle(n.type);
     toast(title, n.message, tone, ic);
+    chime(tone);
     if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
       try { new Notification(title, { body: n.message, tag: n.id }); } catch {}
     }
@@ -339,6 +343,7 @@ function renderShell() {
         <div class="search">${icon.search(16)}<input id="search" placeholder="Search tasks" value="${esc(state.filter.q)}" aria-label="Search tasks"></div>
         <div class="grow"></div>
         <button class="icon-btn" id="theme-btn" aria-label="Toggle theme">${isDark() ? icon.sun() : icon.moon()}</button>
+        <button class="icon-btn" id="sound-btn" aria-pressed="${!isMuted()}" aria-label="${isMuted() ? 'Turn notification sound on' : 'Mute notification sound'}" title="${isMuted() ? 'Sound off' : 'Sound on'}">${isMuted() ? icon.muted() : icon.sound()}</button>
         <button class="icon-btn" id="bell" aria-label="Notifications">${icon.bell()}<span class="badge hidden" id="bell-badge"></span></button>
         <button class="btn primary" id="new-task">${icon.plus(16)}<span class="hide-sm">New Task</span></button>
       </header>
@@ -352,6 +357,14 @@ function renderShell() {
   $$('[data-nav]').forEach((b) => b.addEventListener('click', () => { location.hash = b.dataset.nav; }));
   $('#new-task').addEventListener('click', () => openTaskEditor());
   $('#bell').addEventListener('click', (e) => { e.stopPropagation(); togglePopover(); });
+  $('#sound-btn').addEventListener('click', (e) => {
+    const b = e.currentTarget; const muted = !isMuted(); setMuted(muted);
+    b.innerHTML = muted ? icon.muted() : icon.sound();
+    b.setAttribute('aria-pressed', String(!muted)); b.title = muted ? 'Sound off' : 'Sound on';
+    b.setAttribute('aria-label', muted ? 'Turn notification sound on' : 'Mute notification sound');
+    if (!muted) chime('blue', { force: true });
+    toast(muted ? 'Sounds muted' : 'Sounds on', muted ? 'Notifications will arrive silently.' : 'You will hear a chime for new notifications.', 'gray', muted ? icon.muted : icon.sound);
+  });
   $('#me-card').addEventListener('click', openProfileSheet);
   $('#theme-btn').addEventListener('click', () => {
     applyTheme(isDark() ? 'light' : 'dark');
@@ -528,6 +541,26 @@ function renderTaskView() {
     });
   });
   $$('.status-select').forEach((sel) => sel.addEventListener('change', (e) => changeStatus(sel.dataset.id, e.target.value)));
+  $$('[data-card-del]').forEach((b) => {
+    b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!b.classList.contains('armed')) {
+        b.classList.add('armed');
+        clearTimeout(b._t); b._t = setTimeout(() => b.classList.remove('armed'), 3000);
+        return;
+      }
+      const id = b.dataset.cardDel;
+      const card = b.closest('.tcard');
+      card.classList.add('removing');
+      try {
+        await store.deleteTask(id);
+        state.tasks = state.tasks.filter((x) => x.id !== id);
+        state.remarks = state.remarks.filter((x) => x.task_id !== id);
+        setTimeout(() => { renderTaskView(); updateCounts(); }, 220);
+        toast('Task deleted', '', 'gray', icon.trash);
+      } catch (ex) { card.classList.remove('removing'); b.classList.remove('armed'); fail(ex); }
+    });
+  });
   $('#empty-new')?.addEventListener('click', () => openTaskEditor());
 }
 
@@ -610,6 +643,7 @@ function taskCard(t, i = 0) {
       <span class="pill tone-${p.tone}">${p.label}</span>
       ${dueChip(t)}
       ${locked ? `<span class="lock" title="Assigned by someone else. You can update the status only.">${icon.lock(13)}</span>` : ''}
+      ${canEditTask(t) ? `<button type="button" class="card-del" data-card-del="${esc(t.id)}" aria-label="Delete task" title="Delete task">${icon.trash(14)}<span>Delete?</span></button>` : ''}
     </div>
     <h3 class="tcard-title">${esc(t.title)}</h3>
     ${t.description ? `<p class="task-desc">${esc(t.description)}</p>` : ''}
