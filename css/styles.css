@@ -671,3 +671,8 @@ body.is-dragging .col-empty { border-color: var(--accent); color: var(--accent);
 .btn.danger.solid:disabled { background: var(--red-soft); color: var(--red); opacity: .6; cursor: not-allowed; }
 #del-form .detail-grid { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 520px) { #del-form .detail-grid { grid-template-columns: 1fr; } }
+
+/* v10: active filters and Clear filters */
+.select.is-set { border-color: var(--accent); color: var(--accent); background-color: var(--accent-soft); font-weight: 600; }
+.clear-filters { color: var(--red); }
+.clear-filters:hover { background: var(--red-soft); }

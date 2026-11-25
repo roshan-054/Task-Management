@@ -536,14 +536,15 @@ function renderTaskView() {
       </div></div>
     <div class="toolbar">
       ${mode === 'cards' ? `<div class="segmented" role="tablist">${segs.map(([id, label]) => `<button class="${f.status === id ? 'active' : ''}" data-status="${id}">${label}<span class="n">${counts[id]}</span></button>`).join('')}</div>` : ''}
-      <select class="select" id="f-prio" aria-label="Priority filter">
+      <select class="select ${f.priority !== 'all' ? 'is-set' : ''}" id="f-prio" aria-label="Priority filter">
         <option value="all">All priorities</option>${PRIORITIES.map((p) => `<option value="${p.id}" ${f.priority === p.id ? 'selected' : ''}>${p.label}</option>`).join('')}
       </select>
-      ${platChoices.length ? `<select class="select" id="f-plat" aria-label="Platform filter">
+      ${platChoices.length ? `<select class="select ${f.platform !== 'all' ? 'is-set' : ''}" id="f-plat" aria-label="Platform filter">
         <option value="all">All platforms</option>
         ${platChoices.map((pl) => `<option value="${esc(pl.id)}" ${f.platform === pl.id ? 'selected' : ''}>${esc(pl.name)}${multiDept ? ` · ${esc(deptName(pl.department_id))}` : ''}${pl.archived ? ' (removed)' : ''}</option>`).join('')}
         <option value="none" ${f.platform === 'none' ? 'selected' : ''}>No platform</option>
       </select>` : ''}
+      ${filtersActive() ? `<button class="btn ghost sm clear-filters" id="f-clear" type="button">${icon.x(14)} Clear filters</button>` : ''}
       <select class="select" id="f-sort" aria-label="Sort">
         <option value="due" ${f.sort === 'due' ? 'selected' : ''}>Sort by due date</option>
         <option value="priority" ${f.sort === 'priority' ? 'selected' : ''}>Sort by priority</option>
@@ -559,6 +560,8 @@ function renderTaskView() {
   $('#f-prio').addEventListener('change', (e) => { f.priority = e.target.value; renderTaskView(); });
   $('#f-sort').addEventListener('change', (e) => { f.sort = e.target.value; renderTaskView(); });
   $('#f-plat')?.addEventListener('change', (e) => { f.platform = e.target.value; renderTaskView(); });
+  $('#f-clear')?.addEventListener('click', clearFilters);
+  $('#empty-clear')?.addEventListener('click', clearFilters);
   $$('.tcard').forEach((el) => {
     el.addEventListener('click', (e) => { if (!e.target.closest('select, a, button')) openTask(byId(state.tasks, el.dataset.id)); });
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === el) openTask(byId(state.tasks, el.dataset.id)); });
@@ -603,7 +606,17 @@ function renderTaskView() {
   $('#empty-new')?.addEventListener('click', () => openTaskEditor());
 }
 
+// Anything narrowing the list (sorting doesn't count).
+const filtersActive = () => { const f = state.filter; return f.priority !== 'all' || f.platform !== 'all' || f.q.trim() !== '' || f.status !== 'active'; };
+function clearFilters() {
+  Object.assign(state.filter, { priority: 'all', platform: 'all', q: '', status: 'active' });
+  const s = $('#search'); if (s) s.value = '';
+  renderTaskView();
+}
+
 function emptyState(h) {
+  if (filtersActive()) return `<div class="empty"><div class="art">${icon.search(30)}</div><h3>No tasks match these filters</h3><p>Try another filter, or clear them to see everything.</p>
+    <button class="btn primary" id="empty-clear" style="margin-top:10px">${icon.x(16)} Clear filters</button></div>`;
   const msg = state.filter.q ? ['No matches', 'Try a different search.']
     : h === '#/assigned' ? ['Nothing assigned yet', 'Create a task and assign it to anyone in any team.']
     : h === '#/waiting' ? ['Nobody is waiting on you', 'When someone tags you on a blocked task, it shows up here.']
