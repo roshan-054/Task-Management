@@ -72,6 +72,9 @@ const icon = {
   sun: (s) => I('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>', s),
   grid: (s) => I('<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>', s),
   board: (s) => I('<rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="16.5" y="4" width="4" height="7" rx="1.5"/>', s),
+  at: (s) => I('<circle cx="12" cy="12" r="3.6"/><path d="M15.6 12v1.4a2.6 2.6 0 005.2 0V12a8.8 8.8 0 10-3.5 7"/>', s),
+  alert: (s) => I('<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>', s),
+  chat: (s) => I('<path d="M5 18.5V6.5A2.5 2.5 0 017.5 4h9A2.5 2.5 0 0119 6.5v7a2.5 2.5 0 01-2.5 2.5H9z"/>', s),
   pause: (s) => I('<circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/>', s),
   play: (s) => I('<circle cx="12" cy="12" r="9"/><path d="M10 8.5l5 3.5-5 3.5z"/>', s),
   circle: (s) => I('<circle cx="12" cy="12" r="9"/>', s),
@@ -79,13 +82,18 @@ const icon = {
   info: (s) => I('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>', s),
   user: (s) => I('<circle cx="12" cy="9" r="3.5"/><path d="M5.5 19.5c1-3 3.5-4.5 6.5-4.5s5.5 1.5 6.5 4.5"/><circle cx="12" cy="12" r="10"/>', s),
 };
+const NOTE_STYLE = {
+  completed: ['green', 'Task completed', 'check'], on_hold: ['orange', 'Task on hold', 'pause'], assigned: ['blue', 'New task for you', 'plus'],
+  tagged: ['purple', 'You were tagged', 'at'], blocked: ['red', 'Task blocked', 'alert'], remark: ['blue', 'New remark', 'chat'], resolved: ['green', 'Blocker resolved', 'check'],
+};
+const noteStyle = (type) => { const [tone, title, ic] = NOTE_STYLE[type] || NOTE_STYLE.assigned; return { tone, title, ic: icon[ic] }; };
 const statusIcon = { not_started: icon.circle, in_progress: icon.play, on_hold: icon.pause, completed: icon.check };
 
 // =====================================================================
 //  State
 // =====================================================================
 const state = {
-  me: null, profiles: [], departments: [], teams: [], tasks: [], notifications: [], invitations: [],
+  me: null, profiles: [], departments: [], teams: [], tasks: [], notifications: [], invitations: [], remarks: [],
   filter: { status: 'active', priority: 'all', sort: 'due', q: '' },
   kpiSort: { key: 'score', dir: -1 },
 };
@@ -234,10 +242,11 @@ function renderSetPassword() {
 //  Data loading
 // =====================================================================
 async function loadAll() {
-  const [profiles, departments, teams, tasks, notifications] = await Promise.all([
+  const [profiles, departments, teams, tasks, notifications, remarks] = await Promise.all([
     store.listProfiles(), store.listDepartments(), store.listTeams(), store.listTasks(), store.listNotifications(),
+    store.listRemarks().catch(() => []),
   ]);
-  Object.assign(state, { profiles, departments, teams, tasks, notifications });
+  Object.assign(state, { profiles, departments, teams, tasks, notifications, remarks });
   state.me = byId(profiles, state.me.id) || state.me;
 }
 let refreshTimer;
@@ -246,7 +255,7 @@ function scheduleRefresh(what = 'tasks') {
   refreshTimer = setTimeout(async () => {
     try {
       if (what === 'directory') await loadAll();
-      else { state.tasks = await store.listTasks(); }
+      else { [state.tasks, state.remarks] = await Promise.all([store.listTasks(), store.listRemarks().catch(() => state.remarks)]); }
       if (!$('.overlay')) route(); else updateCounts();
     } catch (e) { console.warn(e); }
   }, 250);
@@ -277,9 +286,8 @@ function onRealtime(msg) {
     const n = msg.record;
     if (state.notifications.some((x) => x.id === n.id)) return;
     state.notifications.unshift(n);
-    const tone = n.type === 'completed' ? 'green' : n.type === 'on_hold' ? 'orange' : 'blue';
-    const title = n.type === 'completed' ? 'Task completed' : n.type === 'on_hold' ? 'Task on hold' : 'New task for you';
-    toast(title, n.message, tone, n.type === 'completed' ? icon.check : n.type === 'on_hold' ? icon.pause : icon.plus);
+    const { tone, title, ic } = noteStyle(n.type);
+    toast(title, n.message, tone, ic);
     if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
       try { new Notification(title, { body: n.message, tag: n.id }); } catch {}
     }
@@ -295,6 +303,7 @@ function onRealtime(msg) {
 function navItems() {
   const items = [
     { hash: '#/tasks', label: 'My Tasks', ic: icon.check, count: () => myTasks().filter((t) => t.status !== 'completed').length },
+    { hash: '#/waiting', label: 'Waiting on Me', ic: icon.at, count: () => waitingOnMe().length },
   ];
   if (isManager()) items.push({ hash: '#/assigned', label: 'Assigned by Me', ic: icon.send, count: () => assignedByMe().filter((t) => t.status !== 'completed').length });
   if (isAdmin()) items.push({ hash: '#/all', label: 'All Tasks', ic: icon.stack });
@@ -304,6 +313,9 @@ function navItems() {
   if (isManager()) { items.push({ section: 'Organisation' }); items.push({ hash: '#/people', label: 'People & Teams', ic: icon.team }); }
   return items;
 }
+const remarksFor = (taskId) => state.remarks.filter((r) => r.task_id === taskId);
+const openBlockers = (taskId) => state.remarks.filter((r) => r.task_id === taskId && r.kind === 'blocker' && !r.resolved_at);
+const waitingOnMe = () => state.tasks.filter((t) => t.status !== 'completed' && openBlockers(t.id).some((r) => r.tagged.includes(state.me.id)));
 const myTasks = () => state.tasks.filter((t) => t.assigned_to === state.me.id);
 const assignedByMe = () => state.tasks.filter((t) => t.created_by === state.me.id && t.assigned_to !== state.me.id);
 
@@ -331,7 +343,7 @@ function renderShell() {
       <div id="view"></div>
     </div>
     <nav class="mobile-tabs">
-      ${items.filter((it) => !it.section).slice(0, 5).map((it) => `<button data-nav="${it.hash}">${it.ic(22)}<span>${esc(it.label.replace('Assigned by Me', 'Assigned').replace('My Performance', 'KPI').replace('Team Performance', 'KPI').replace('People & Teams', 'People'))}</span></button>`).join('')}
+      ${items.filter((it) => !it.section).slice(0, 5).map((it) => `<button data-nav="${it.hash}">${it.ic(22)}<span>${esc(it.label.replace('Assigned by Me', 'Assigned').replace('My Performance', 'KPI').replace('Team Performance', 'KPI').replace('People & Teams', 'People').replace('Waiting on Me', 'Waiting'))}</span></button>`).join('')}
     </nav>
   </div>`;
 
@@ -345,7 +357,7 @@ function renderShell() {
   });
   $('#search').addEventListener('input', (e) => {
     state.filter.q = e.target.value;
-    if (!/^#\/(tasks|assigned|all)/.test(location.hash)) location.hash = '#/tasks'; else renderTaskView();
+    if (!/^#\/(tasks|assigned|all|waiting)/.test(location.hash)) location.hash = '#/tasks'; else renderTaskView();
   });
   updateCounts();
 }
@@ -386,8 +398,7 @@ function renderPopover() {
   el.innerHTML = `
     <div class="popover-head"><h3>Notifications</h3>${canAsk ? `<button class="btn ghost sm" id="desk">Enable desktop alerts</button>` : ''}</div>
     ${ns.length ? ns.map((n) => {
-      const tone = n.type === 'completed' ? 'green' : n.type === 'on_hold' ? 'orange' : 'blue';
-      const ic = n.type === 'completed' ? icon.check : n.type === 'on_hold' ? icon.pause : icon.plus;
+      const { tone, ic } = noteStyle(n.type);
       return `<div class="notif ${n.read ? '' : 'unread'}" data-task="${esc(n.task_id)}"><div class="ic tone-${tone}">${ic(16)}</div><div style="flex:1"><p>${esc(n.message)}</p><time>${esc(timeAgo(n.created_at))}</time></div></div>`;
     }).join('') : `<div class="empty" style="padding:32px 16px"><div class="art">${icon.bell(28)}</div>You're all caught up.</div>`}`;
   $('#desk', el)?.addEventListener('click', async () => { await Notification.requestPermission(); renderPopover(); });
@@ -406,7 +417,7 @@ function route() {
   const h = location.hash || '#/tasks';
   $$('[data-nav]').forEach((b) => b.classList.toggle('active', h === b.dataset.nav || (h.startsWith('#/kpi/') && b.dataset.nav === '#/team-kpi')));
   closePopover();
-  if (/^#\/(tasks|assigned|all)$/.test(h)) {
+  if (/^#\/(tasks|assigned|all|waiting)$/.test(h)) {
     if ((h === '#/assigned' && !isManager()) || (h === '#/all' && !isAdmin())) { location.hash = '#/tasks'; return; }
     renderTaskView();
   } else if (h === '#/kpi') { if (isManager()) { location.hash = '#/team-kpi'; return; } renderKpi(state.me.id); }
@@ -425,6 +436,7 @@ function viewTasks() {
   const h = location.hash;
   if (h === '#/assigned') return assignedByMe();
   if (h === '#/all') return state.tasks;
+  if (h === '#/waiting') return waitingOnMe();
   return myTasks();
 }
 
@@ -438,6 +450,7 @@ function renderTaskView() {
     '#/tasks': ['My Tasks', 'Everything assigned to you.'],
     '#/assigned': ['Assigned by Me', 'Tasks you gave to others. You will be notified the moment one is completed.'],
     '#/all': ['All Tasks', 'Every task in the organisation (admin view).'],
+    '#/waiting': ['Waiting on Me', 'Tasks where someone is blocked and tagged you. Reply or resolve the blocker to unblock them.'],
   };
   const f = state.filter;
   const mode = getViewMode();
@@ -519,6 +532,7 @@ function renderTaskView() {
 function emptyState(h) {
   const msg = state.filter.q ? ['No matches', 'Try a different search.']
     : h === '#/assigned' ? ['Nothing assigned yet', 'Create a task and assign it to anyone in any team.']
+    : h === '#/waiting' ? ['Nobody is waiting on you', 'When someone tags you on a blocked task, it shows up here.']
     : ['You are all clear', 'New tasks assigned to you will appear here instantly.'];
   return `<div class="empty"><div class="art">${icon.check(30)}</div><h3>${msg[0]}</h3><p>${msg[1]}</p>
     <button class="btn primary" id="empty-new" style="margin-top:10px">${icon.plus(16)} New Task</button></div>`;
@@ -528,6 +542,15 @@ function statusSelect(t) {
   const s = statusOf(t.status);
   return `<select class="status-select tone-${s.tone}" data-id="${esc(t.id)}" aria-label="Work status">
     ${STATUSES.map((x) => `<option value="${x.id}" ${x.id === t.status ? 'selected' : ''}>${x.label}</option>`).join('')}</select>`;
+}
+
+const REASONS = { issue: 'Issue', delay: 'Delay by someone', dependency: 'Depends on someone', other: 'Other' };
+function blockerBanner(t) {
+  const b = openBlockers(t.id);
+  if (!b.length) return '';
+  const last = b[b.length - 1];
+  const names = [...new Set(b.flatMap((r) => r.tagged))].map((id) => id === state.me.id ? 'you' : person(id).full_name.split(' ')[0]);
+  return `<div class="blocker-banner">${icon.alert(14)}<span><b>Blocked</b> · ${esc(REASONS[last.reason] || 'Other')}${names.length ? ` · waiting on ${esc(names.join(', '))}` : ''}</span></div>`;
 }
 
 function personChip(label, p) {
@@ -552,12 +575,14 @@ function taskCard(t, i = 0) {
     <h3 class="tcard-title">${esc(t.title)}</h3>
     ${t.description ? `<p class="task-desc">${esc(t.description)}</p>` : ''}
     ${links.length ? `<div class="links">${links.map((l) => `<a class="link-chip" href="${esc(l.href)}" target="_blank" rel="noopener noreferrer">${icon.link(13)}<span>${esc(l.label || new URL(l.href).hostname)}</span></a>`).join('')}</div>` : ''}
+    ${blockerBanner(t)}
     <div class="tcard-people">
       ${personChip('Assigned by', creator)}
       ${personChip('Assigned to', assignee)}
     </div>
     <div class="tcard-foot">
       ${canStatus ? statusSelect(t) : `<span class="pill dot tone-${statusOf(t.status).tone}">${statusOf(t.status).label}</span>`}
+      ${remarksFor(t.id).length ? `<span class="remark-count" title="Remarks">${icon.chat(13)} ${remarksFor(t.id).length}</span>` : ''}
       ${t.completed_at ? `<span class="done-at" title="Completed ${esc(fmtDateTime(t.completed_at))}">${icon.check(14)} ${esc(fmtDateTime(t.completed_at))}</span>` : `<span class="small muted">Added ${esc(timeAgo(t.created_at))}</span>`}
     </div>
   </article>`;
@@ -573,8 +598,102 @@ async function changeStatus(id, status) {
     Object.assign(t, updated);
     if (status === 'completed') toast('Nice work', t.created_by !== state.me.id ? `${person(t.created_by).full_name} has been notified.` : 'Task completed.', 'green', icon.check);
   } catch (e) { t.status = prev; fail(e); }
-  if (/^#\/(tasks|assigned|all)/.test(location.hash)) renderTaskView();
+  if (/^#\/(tasks|assigned|all|waiting)/.test(location.hash)) renderTaskView();
   updateCounts();
+}
+
+// ---------- remarks ----------
+function managersOf(p) {
+  return state.profiles.filter((m) => m.active && m.role === 'manager' && m.department_id && m.department_id === p.department_id && m.id !== p.id);
+}
+function renderRemarks(t, ov) {
+  const el = $('[data-remarks]', ov);
+  if (!el) return;
+  const list = remarksFor(t.id);
+  const canStatus = t.assigned_to === state.me.id || canEditTask(t);
+  const tags = new Set();
+  const people = state.profiles.filter((p) => p.active && p.id !== state.me.id);
+  el.innerHTML = `
+    <div class="remarks">
+      <div class="field"><label>Remarks ${list.length ? `<span class="muted">· ${list.length}</span>` : ''}</label></div>
+      <div class="remark-list">${list.length ? list.map((r) => remarkItem(r)).join('') : '<div class="small muted">No remarks yet.</div>'}</div>
+      <div class="composer">
+        <textarea class="textarea" data-r-body rows="2" maxlength="2000" placeholder="Add a remark, update or reason for delay…"></textarea>
+        <div class="composer-row">
+          <label class="toggle"><input type="checkbox" data-r-block> <span>${icon.alert(14)} Flag as blocked</span></label>
+          <select class="select sm" data-r-reason disabled>${Object.entries(REASONS).map(([k, v]) => `<option value="${k}" ${k === 'dependency' ? 'selected' : ''}>${v}</option>`).join('')}</select>
+        </div>
+        <div class="composer-row">
+          <select class="select sm" data-r-tag><option value="">Tag a person…</option>${people.map((p) => `<option value="${esc(p.id)}">${esc(p.full_name)} · ${esc(teamName(p.team_id))}</option>`).join('')}</select>
+          <label class="toggle"><input type="checkbox" data-r-mgr checked> <span>Also tag their manager</span></label>
+        </div>
+        <div class="tag-chips" data-r-chips></div>
+        ${canStatus && t.status !== 'on_hold' && t.status !== 'completed' ? `<label class="toggle hidden" data-r-hold-wrap><input type="checkbox" data-r-hold checked> <span>Set work status to On hold</span></label>` : ''}
+        <div class="composer-row end"><button type="button" class="btn primary sm" data-r-post>${icon.chat(14)} Post remark</button></div>
+      </div>
+    </div>`;
+  const chips = $('[data-r-chips]', el);
+  const drawChips = () => {
+    chips.innerHTML = [...tags].map((id) => `<span class="tag-chip">${avatar(person(id), 'sm')}${esc(person(id).full_name)}<button type="button" data-untag="${esc(id)}" aria-label="Remove">${icon.x(12)}</button></span>`).join('');
+    $$('[data-untag]', chips).forEach((b) => b.addEventListener('click', () => { tags.delete(b.dataset.untag); drawChips(); }));
+  };
+  $('[data-r-tag]', el).addEventListener('change', (e) => {
+    const id = e.target.value; if (!id) return;
+    tags.add(id);
+    if ($('[data-r-mgr]', el).checked) managersOf(person(id)).forEach((m) => { if (m.id !== state.me.id) tags.add(m.id); });
+    e.target.value = ''; drawChips();
+  });
+  $('[data-r-block]', el).addEventListener('change', (e) => {
+    $('[data-r-reason]', el).disabled = !e.target.checked;
+    $('[data-r-hold-wrap]', el)?.classList.toggle('hidden', !e.target.checked);
+  });
+  $('[data-r-post]', el).addEventListener('click', async (e) => {
+    const body = $('[data-r-body]', el).value.trim();
+    if (!body) { $('[data-r-body]', el).focus(); return toast('Write a remark first', '', 'orange', icon.chat); }
+    const blocker = $('[data-r-block]', el).checked;
+    e.currentTarget.disabled = true;
+    try {
+      const r = await store.addRemark({ task_id: t.id, body, kind: blocker ? 'blocker' : 'note', reason: blocker ? $('[data-r-reason]', el).value : null, tagged: [...tags] });
+      if (!state.remarks.some((x) => x.id === r.id)) state.remarks.push(r);
+      if (blocker && $('[data-r-hold]', el)?.checked && !$('[data-r-hold-wrap]', el)?.classList.contains('hidden')) await changeStatus(t.id, 'on_hold');
+      toast(blocker ? 'Blocker flagged' : 'Remark added', tags.size ? `${tags.size} ${tags.size === 1 ? 'person' : 'people'} notified.` : '', blocker ? 'red' : 'blue', blocker ? icon.alert : icon.chat);
+      renderRemarks(byId(state.tasks, t.id) || t, ov);
+      if (/^#\/(tasks|assigned|all|waiting)/.test(location.hash)) renderTaskView();
+      updateCounts();
+    } catch (ex) { fail(ex); e.currentTarget.disabled = false; }
+  });
+  $$('[data-resolve]', el).forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const r = await store.resolveRemark(b.dataset.resolve, true);
+      Object.assign(state.remarks.find((x) => x.id === r.id) || {}, r);
+      toast('Blocker resolved', 'Everyone involved has been notified.', 'green', icon.check);
+      renderRemarks(t, ov);
+      if (/^#\/(tasks|assigned|all|waiting)/.test(location.hash)) renderTaskView();
+      updateCounts();
+    } catch (ex) { fail(ex); }
+  }));
+  $$('[data-del-remark]', el).forEach((b) => b.addEventListener('click', async () => {
+    if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.style.color = 'var(--red)'; b.title = 'Click again to delete'; return; }
+    try { await store.deleteRemark(b.dataset.delRemark); state.remarks = state.remarks.filter((x) => x.id !== b.dataset.delRemark); renderRemarks(t, ov); renderTaskView(); } catch (ex) { fail(ex); }
+  }));
+}
+function remarkItem(r) {
+  const a = person(r.author_id);
+  const blocker = r.kind === 'blocker';
+  return `<div class="remark ${blocker ? 'is-blocker' : ''} ${r.resolved_at ? 'is-resolved' : ''}">
+    ${avatar(a, 'sm')}
+    <div class="remark-main">
+      <div class="remark-head"><b>${esc(r.author_id === state.me.id ? 'You' : a.full_name)}</b>
+        ${blocker ? `<span class="pill ${r.resolved_at ? 'tone-green' : 'tone-red'}">${r.resolved_at ? 'Resolved' : 'Blocked'} · ${esc(REASONS[r.reason] || 'Other')}</span>` : ''}
+        <time>${esc(fmtDateTime(r.created_at))}</time>
+        ${r.author_id === state.me.id || isAdmin() ? `<button type="button" class="icon-btn xs" data-del-remark="${esc(r.id)}" aria-label="Delete remark">${icon.trash(13)}</button>` : ''}
+      </div>
+      <div class="remark-body">${esc(r.body)}</div>
+      ${r.tagged.length ? `<div class="tag-chips">${r.tagged.map((id) => `<span class="tag-chip static">@${esc(id === state.me.id ? 'you' : person(id).full_name)}</span>`).join('')}</div>` : ''}
+      ${blocker && !r.resolved_at ? `<button type="button" class="btn sm" data-resolve="${esc(r.id)}">${icon.check(14)} Mark resolved</button>` : ''}
+      ${r.resolved_at ? `<div class="small muted">Resolved by ${esc(person(r.resolved_by).full_name)} · ${esc(fmtDateTime(r.resolved_at))}</div>` : ''}
+    </div>
+  </div>`;
 }
 
 // ---------- task detail ----------
@@ -611,7 +730,9 @@ function openTask(t) {
   const overdue = t.status !== 'completed' && t.due_date && t.due_date < todayISO();
   openSheet(`${sheetHead(t.title)}
     <div class="sheet-body">
-      <div class="notice">${icon.lock(18)}<div>Assigned by <b>${esc(creator.full_name)}</b>. You can update the work status. Other details can only be changed by the person who assigned it.</div></div>
+      ${canStatus ? `<div class="notice">${icon.lock(18)}<div>Assigned by <b>${esc(creator.full_name)}</b>. You can update the work status and add remarks. Other details can only be changed by the person who assigned it.</div></div>`
+        : `<div class="notice">${icon.at(18)}<div>You were tagged on this task. Add a remark to reply, or resolve the blocker once it's sorted.</div></div>`}
+      ${blockerBanner(t)}
       ${t.description ? `<div style="white-space:pre-wrap">${esc(t.description)}</div>` : ''}
       <div class="detail-grid">
         <div class="detail"><div class="k">Priority</div><div class="v"><span class="pill tone-${p.tone}">${p.label}</span></div></div>
@@ -620,12 +741,14 @@ function openTask(t) {
         <div class="detail"><div class="k">Assigned to</div><div class="v">${avatar(assignee, 'sm')} ${esc(assignee.full_name)}</div></div>
       </div>
       ${timingBlock(t)}
+      <div data-remarks></div>
       ${links.length ? `<div><div class="field"><label>Related links</label></div><div class="links">${links.map((l) => `<a class="link-chip" href="${esc(l.href)}" target="_blank" rel="noopener noreferrer">${icon.link(14)}<span>${esc(l.label || l.href)}</span>${icon.arrow(12)}</a>`).join('')}</div></div>` : ''}
       ${canStatus ? `<div class="field"><label>Work status</label>
         <div class="status-picker">${STATUSES.map((s) => `<button type="button" class="tone-${s.tone} ${s.id === t.status ? 'active' : ''}" data-set="${s.id}" style="background:${s.id === t.status ? '' : 'var(--surface)'}">${statusIcon[s.id](22)}${s.label}</button>`).join('')}</div></div>`
         : `<div class="detail"><div class="k">Status</div><div class="v"><span class="pill dot tone-${statusOf(t.status).tone}">${statusOf(t.status).label}</span></div></div>`}
     </div>`, (ov) => {
     loadHistory(t, ov);
+    renderRemarks(t, ov);
     $$('[data-set]', ov).forEach((b) => b.addEventListener('click', async () => {
       await changeStatus(t.id, b.dataset.set);
       closeSheet();
@@ -671,7 +794,7 @@ function openTaskEditor(t = null) {
       <div class="field"><label>Related links</label>
         <div id="links" style="display:grid;gap:8px">${(data.links || []).map(linkRow).join('')}</div>
         <button type="button" class="btn ghost sm" id="add-link" style="justify-self:start">${icon.plus(14)} Add link</button></div>
-      ${editing ? timingBlock(t) : ''}
+      ${editing ? timingBlock(t) + '<div data-remarks></div>' : ''}
       <div class="error" id="t-error"></div>
     </div>
     <div class="sheet-foot">
@@ -679,7 +802,7 @@ function openTaskEditor(t = null) {
       <button type="button" class="btn" data-close>Cancel</button>
       <button type="submit" class="btn primary">${editing ? 'Save changes' : 'Create task'}</button>
     </div></form>`, (ov) => {
-    if (editing) loadHistory(t, ov);
+    if (editing) { loadHistory(t, ov); renderRemarks(t, ov); }
     const linksEl = $('#links', ov);
     const bindRm = () => $$('[data-rm]', linksEl).forEach((b) => { b.onclick = () => b.closest('.link-row').remove(); });
     bindRm();

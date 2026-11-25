@@ -496,3 +496,37 @@ body.is-dragging .col-empty { border-color: var(--accent); color: var(--accent);
 .check-row { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; }
 .check-row input { margin-top: 3px; width: 18px; height: 18px; accent-color: var(--accent); }
 .team-av { background: linear-gradient(145deg, #6e5bff, #0a84ff 55%, #2fd3f5); }
+
+/* =====================================================================
+   v3: remarks, blockers, tagging
+   ===================================================================== */
+.blocker-banner { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 10px; background: var(--red-soft); color: var(--red); font-size: 12.5px; }
+.blocker-banner span { color: var(--text); }
+.blocker-banner b { color: var(--red); }
+.remark-count { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); font-weight: 600; margin-left: auto; margin-right: 6px; }
+.remarks { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; display: grid; gap: 10px; }
+.remark-list { display: grid; gap: 10px; }
+.remark { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 10px; border-radius: 12px; background: var(--surface-2); }
+.remark.is-blocker { background: var(--red-soft); }
+.remark.is-blocker.is-resolved { background: var(--green-soft); }
+.remark-main { display: grid; gap: 6px; min-width: 0; }
+.remark-main > .btn { justify-self: start; }
+.remark-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; }
+.remark-head time { font-size: 12px; color: var(--text-3); margin-left: auto; }
+.remark-body { white-space: pre-wrap; font-size: 14px; overflow-wrap: anywhere; }
+.icon-btn.xs { width: 24px; height: 24px; }
+.composer { display: grid; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
+.composer .textarea { min-height: 64px; }
+.composer-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.composer-row.end { justify-content: flex-end; }
+.select.sm { width: auto; flex: 1; min-width: 160px; padding: 8px 32px 8px 12px; font-size: 13px; border-radius: 10px; }
+.select:disabled { opacity: 0.5; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; user-select: none; }
+.toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
+.toggle span { display: inline-flex; align-items: center; gap: 5px; }
+.tag-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-chips:empty { display: none; }
+.tag-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 4px; border-radius: 980px; background: var(--purple-soft); color: var(--purple); font-size: 12.5px; font-weight: 600; }
+.tag-chip.static { padding: 2px 9px; }
+.tag-chip button { border: 0; background: none; color: inherit; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.sheet-head { background: var(--glass-strong); backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px); z-index: 3; border-radius: 24px 24px 0 0; }

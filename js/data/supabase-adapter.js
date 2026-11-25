@@ -115,6 +115,21 @@ export class SupabaseAdapter {
     return unwrap(await this.sb.from('task_events').select('*').eq('task_id', taskId).order('created_at'));
   }
 
+  // ---------- remarks ----------
+  async listRemarks() {
+    return unwrap(await this.sb.from('task_remarks').select('*').order('created_at'));
+  }
+  async addRemark(r) {
+    const uid = await this.getSessionUserId();
+    return unwrap(await this.sb.from('task_remarks').insert({ ...r, author_id: uid }).select().single());
+  }
+  async resolveRemark(id, resolved = true) {
+    return unwrap(await this.sb.from('task_remarks').update({ resolved_at: resolved ? new Date().toISOString() : null }).eq('id', id).select().single());
+  }
+  async deleteRemark(id) {
+    unwrap(await this.sb.from('task_remarks').delete().eq('id', id));
+  }
+
   // ---------- notifications ----------
   async listNotifications() {
     return unwrap(await this.sb.from('notifications').select('*').order('created_at', { ascending: false }).limit(50));
@@ -136,6 +151,8 @@ export class SupabaseAdapter {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
         (p) => cb({ kind: 'notification', record: p.new }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' },
+        () => cb({ kind: 'task' }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_remarks' },
         () => cb({ kind: 'task' }))
       .subscribe();
     return () => { this.sb.removeChannel(this.channel); this.channel = null; };

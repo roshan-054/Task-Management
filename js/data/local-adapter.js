@@ -61,6 +61,12 @@ function seed() {
     invitations: [],
     tasks,
     notifications: [],
+    task_remarks: [
+      { id: uid(), task_id: tasks[4].id, author_id: u3.id, kind: 'blocker', reason: 'dependency', tagged: [u2.id, mSales.id],
+        body: 'Waiting for final pricing sheet from Priya before I can finish the deck.', created_at: hoursAgo(20), resolved_at: null, resolved_by: null },
+      { id: uid(), task_id: tasks[0].id, author_id: u1.id, kind: 'note', reason: null, tagged: [],
+        body: 'Draft shared with the team, final version by Wednesday.', created_at: hoursAgo(5), resolved_at: null, resolved_by: null },
+    ],
     task_events: tasks.flatMap((t) => [
       { id: uid(), task_id: t.id, changed_by: t.created_by, from_status: null, to_status: 'not_started', created_at: t.created_at },
       ...(t.completed_at ? [{ id: uid(), task_id: t.id, changed_by: t.assigned_to, from_status: 'in_progress', to_status: 'completed', created_at: t.completed_at }] : []),
@@ -97,6 +103,7 @@ export class LocalAdapter {
     if (!raw) { const s = seed(); this.save(s); return s; }
     const db = JSON.parse(raw);
     db.task_events ||= [];
+    db.task_remarks ||= [];
     return db;
   }
   save(db) { try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch {} }
@@ -219,10 +226,13 @@ export class LocalAdapter {
   }
 
   // ---------- tasks ----------
-  canSee(me, t) { return t.assigned_to === me.id || t.created_by === me.id || me.role === 'admin'; }
+  canSee(me, t, db = this.db) {
+    return t.assigned_to === me.id || t.created_by === me.id || me.role === 'admin'
+      || (db.task_remarks || []).some((r) => r.task_id === t.id && r.tagged.includes(me.id));
+  }
   async listTasks() {
     const db = this.db; const me = this.me(db);
-    return clone(db.tasks.filter((t) => this.canSee(me, t))).sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return clone(db.tasks.filter((t) => this.canSee(me, t, db))).sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
   notify(db, user_id, task, type, message) {
     db.notifications.unshift({ id: uid(), user_id, task_id: task.id, type, message, read: false, created_at: now() });
@@ -247,7 +257,7 @@ export class LocalAdapter {
   async updateTask(id, patch) {
     const db = this.db; const me = this.me(db);
     const t = db.tasks.find((x) => x.id === id);
-    if (!t || !this.canSee(me, t)) throw new Error('Task not found.');
+    if (!t || !(t.assigned_to === me.id || t.created_by === me.id || me.role === 'admin')) throw new Error('You can only add remarks to this task.');
     if (me.id !== t.created_by && me.role !== 'admin') {
       for (const k of Object.keys(patch))
         if (k !== 'status' && JSON.stringify(patch[k]) !== JSON.stringify(t[k]))
@@ -288,6 +298,55 @@ export class LocalAdapter {
     const t = db.tasks.find((x) => x.id === taskId);
     if (!t || !this.canSee(me, t)) return [];
     return clone(db.task_events.filter((e) => e.task_id === taskId)).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+
+  // ---------- remarks (mirrors migrations/003_task_remarks.sql) ----------
+  async listRemarks() {
+    const db = this.db; const me = this.me(db);
+    const visible = new Set(db.tasks.filter((t) => this.canSee(me, t, db)).map((t) => t.id));
+    return clone(db.task_remarks.filter((r) => visible.has(r.task_id))).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+  async addRemark(input) {
+    const db = this.db; const me = this.me(db);
+    const t = db.tasks.find((x) => x.id === input.task_id);
+    if (!t || !this.canSee(me, t, db)) throw new Error('Task not found.');
+    const body = (input.body || '').trim();
+    if (!body) throw new Error('Write a remark first.');
+    const kind = input.kind === 'blocker' ? 'blocker' : 'note';
+    const tagged = [...new Set(input.tagged || [])].filter((id) => id !== me.id && db.profiles.some((p) => p.id === id && p.active));
+    const r = { id: uid(), task_id: t.id, author_id: me.id, body, kind, reason: kind === 'blocker' ? (input.reason || 'other') : null,
+      tagged, created_at: now(), resolved_at: null, resolved_by: null };
+    db.task_remarks.push(r);
+    const why = { issue: 'an issue', delay: 'a delay', dependency: 'a dependency' }[r.reason] || 'a blocker';
+    const notes = tagged.map((u) => this.notify(db, u, t, 'tagged', `${me.full_name} tagged you on "${t.title}"${kind === 'blocker' ? ` (blocked by ${why})` : ''}`));
+    [...new Set([t.created_by, t.assigned_to])].filter((u) => u !== me.id && !tagged.includes(u)).forEach((u) =>
+      notes.push(this.notify(db, u, t, kind === 'blocker' ? 'blocked' : 'remark',
+        kind === 'blocker' ? `${me.full_name} flagged "${t.title}" as blocked by ${why}` : `${me.full_name} added a remark on "${t.title}"`)));
+    this.save(db);
+    this.emit({ kind: 'task' });
+    notes.forEach((n) => this.emit({ kind: 'notification', record: n }));
+    return clone(r);
+  }
+  async resolveRemark(id, resolved = true) {
+    const db = this.db; const me = this.me(db);
+    const r = db.task_remarks.find((x) => x.id === id);
+    const t = r && db.tasks.find((x) => x.id === r.task_id);
+    if (!r || !t || !this.canSee(me, t, db)) throw new Error('Remark not found.');
+    const was = !!r.resolved_at;
+    r.resolved_at = resolved ? now() : null; r.resolved_by = resolved ? me.id : null;
+    const notes = [];
+    if (resolved && !was) [...new Set([r.author_id, t.created_by, t.assigned_to])].filter((u) => u !== me.id)
+      .forEach((u) => notes.push(this.notify(db, u, t, 'resolved', `${me.full_name} resolved a blocker on "${t.title}"`)));
+    this.save(db); this.emit({ kind: 'task' });
+    notes.forEach((n) => this.emit({ kind: 'notification', record: n }));
+    return clone(r);
+  }
+  async deleteRemark(id) {
+    const db = this.db; const me = this.me(db);
+    const r = db.task_remarks.find((x) => x.id === id);
+    if (!r || (r.author_id !== me.id && me.role !== 'admin')) throw new Error('Only the author can delete this remark.');
+    db.task_remarks = db.task_remarks.filter((x) => x.id !== id);
+    this.save(db); this.emit({ kind: 'task' });
   }
 
   // ---------- notifications ----------

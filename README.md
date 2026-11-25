@@ -15,6 +15,7 @@ A team task manager with roles, live completion alerts and KPI profiles. It is a
 | **Live alerts** | The assigning manager gets an instant in-app alert (and an optional desktop notification) when a task is completed or put on hold. Assignees are alerted when a task is assigned to them. |
 | **Board & cards** | Tasks show as a drag-and-drop board (one column per status) or as cards. Every card shows priority, due date, links, **Assigned by** and **Assigned to**. |
 | **Completion time & history** | The exact date and time a task is started and completed is recorded automatically, and every status change is logged in `task_events` (who, from, to, when) for future analytics. |
+| **Remarks & blockers** | Anyone on a task can add remarks. A remark can **flag the task as blocked** with a reason (issue, delay by someone, depends on someone) and **tag people**, optionally with their manager. Tagged people get a live alert, see the task under **Waiting on Me**, can reply and **mark the blocker resolved**, but cannot edit the task. Cards show a red "Blocked · waiting on …" banner until it's resolved. |
 | **KPI profiles** | Every person has a profile with a score, completion rate, on-time delivery, average time to complete, overdue count, status breakdown and weekly completions. Team members see **My Performance**. Managers and admins see **Team Performance**: the combined figures for their department (admins: everyone) plus each person's profile. |
 
 **KPI score** = 40% completion rate + 40% on-time delivery + 20% open tasks not overdue. Change the weights in `js/kpi.js`.
@@ -71,6 +72,7 @@ When a new version adds database changes, run the matching file in `supabase/mig
 | File | Adds |
 |---|---|
 | `002_task_history.sql` | `tasks.started_at`, the `task_events` status history table, and backfills existing tasks |
+| `003_task_remarks.sql` | `task_remarks` (remarks, blockers, tagged people), notifications for them, and read access for tagged people |
 
 **Activating people from the panel with "Confirm email" on:** Supabase still sends them a confirmation email, and they must click it before their first sign-in. Supabase's built-in email service only sends a few emails per hour; if you add many people at once, set up custom SMTP under **Authentication → Emails**, or turn **Confirm email** off and use **Activate account now** when you add each person (so no invitation is left waiting for someone else to claim).
 
