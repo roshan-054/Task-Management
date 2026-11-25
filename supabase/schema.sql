@@ -954,3 +954,145 @@ from public.departments d
 cross join (values ('Amazon'), ('Custom'), ('Other')) as v(name)
 where lower(replace(d.name, ' ', '')) in ('revops', 'revenueoperations')
 on conflict do nothing;
+
+
+-- =====================================================================
+--  007 · Personal to-do list and notes
+--  Private to each person: nobody else (not even admins) can read them.
+--  Safe to run more than once. Included in schema.sql.
+-- =====================================================================
+
+create table if not exists public.todos (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references public.profiles(id) on delete cascade,
+  title      text not null check (char_length(btrim(title)) between 1 and 300),
+  done       boolean not null default false,
+  position   double precision not null default extract(epoch from now()),
+  created_at timestamptz not null default now(),
+  done_at    timestamptz
+);
+create index if not exists todos_user_idx on public.todos (user_id, position);
+
+create table if not exists public.notes (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references public.profiles(id) on delete cascade,
+  title      text not null default '' check (char_length(title) <= 200),
+  body       text not null default '' check (char_length(body) <= 50000),
+  pinned     boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists notes_user_idx on public.notes (user_id, updated_at desc);
+
+-- Owner is always the signed-in person; timestamps are set by the database.
+create or replace function public.stamp_personal_row() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is not null then new.user_id := coalesce(old.user_id, auth.uid()); end if;
+  if tg_table_name = 'todos' then
+    if new.done and (tg_op = 'INSERT' or not old.done) then new.done_at := now();
+    elsif not new.done then new.done_at := null; end if;
+  else
+    new.updated_at := now();
+  end if;
+  return new;
+end $$;
+drop trigger if exists todos_stamp on public.todos;
+create trigger todos_stamp before insert or update on public.todos for each row execute function public.stamp_personal_row();
+drop trigger if exists notes_stamp on public.notes;
+create trigger notes_stamp before insert or update on public.notes for each row execute function public.stamp_personal_row();
+
+alter table public.todos enable row level security;
+alter table public.notes enable row level security;
+drop policy if exists todos_own on public.todos;
+drop policy if exists notes_own on public.notes;
+create policy todos_own on public.todos for all to authenticated
+  using (user_id = auth.uid() and public.my_role() is not null) with check (user_id = auth.uid() and public.my_role() is not null);
+create policy notes_own on public.notes for all to authenticated
+  using (user_id = auth.uid() and public.my_role() is not null) with check (user_id = auth.uid() and public.my_role() is not null);
+revoke all on public.todos, public.notes from anon;
+grant select, insert, update, delete on public.todos, public.notes to authenticated;
+revoke execute on function public.stamp_personal_row() from public, anon;
+
+
+-- =====================================================================
+--  008 · Admins can delete a user
+--  Removes their login (they can never sign in again), hands their open
+--  tasks to someone else (or deletes them), and keeps a "(deleted)"
+--  placeholder so completed work, remarks and history stay readable.
+--  Safe to run more than once. Included in schema.sql.
+-- =====================================================================
+
+alter table public.profiles add column if not exists deleted_at timestamptz;
+
+-- Let the profile outlive the login it came from: drop the
+-- profiles.id -> auth.users foreign key (whatever its name is).
+do $$
+declare c record;
+begin
+  for c in select conname from pg_constraint
+           where conrelid = 'public.profiles'::regclass and contype = 'f'
+             and confrelid = 'auth.users'::regclass loop
+    execute format('alter table public.profiles drop constraint %I', c.conname);
+  end loop;
+end $$;
+
+-- p_reassign_to: who gets their open tasks. NULL deletes those open tasks.
+-- Returns how many open tasks were moved or deleted.
+create or replace function public.admin_delete_user(p_user uuid, p_reassign_to uuid default null)
+returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  target public.profiles%rowtype;
+  heir   public.profiles%rowtype;
+  n int := 0;
+begin
+  if not public.is_admin() then raise exception 'Only an admin can delete users.'; end if;
+  if p_user = auth.uid() then raise exception 'You cannot delete your own account.'; end if;
+  select * into target from public.profiles where id = p_user;
+  if target.id is null or target.deleted_at is not null then raise exception 'User not found.'; end if;
+  if target.role = 'admin' and not exists (
+       select 1 from public.profiles where role = 'admin' and active and deleted_at is null and id <> p_user) then
+    raise exception 'You cannot delete the last admin.';
+  end if;
+
+  if p_reassign_to is not null then
+    select * into heir from public.profiles where id = p_reassign_to and active and deleted_at is null;
+    if heir.id is null or heir.id = p_user then raise exception 'Choose an active person to take over their open tasks.'; end if;
+    -- Keep the platform only if it belongs to the new person's department.
+    update public.tasks t set
+      assigned_to = heir.id,
+      platform_id = case when exists (select 1 from public.platforms pl where pl.id = t.platform_id and pl.department_id = heir.department_id)
+                         then t.platform_id else null end
+    where t.assigned_to = p_user and t.status <> 'completed';
+    get diagnostics n = row_count;
+  else
+    delete from public.tasks where assigned_to = p_user and status <> 'completed';
+    get diagnostics n = row_count;
+  end if;
+
+  -- Private data and things that would let them back in.
+  delete from public.todos where user_id = p_user;
+  delete from public.notes where user_id = p_user;
+  delete from public.notifications where user_id = p_user;
+  delete from public.invitations where lower(email) = lower(target.email);
+  update public.profiles set manager_id = null where manager_id = p_user;
+
+  -- Placeholder that keeps history readable.
+  update public.profiles set
+    full_name  = coalesce(nullif(target.full_name, ''), split_part(target.email, '@', 1)) || ' (deleted)',
+    email      = 'deleted+' || target.id || '@deleted.invalid',
+    title      = '',
+    role       = 'member',
+    active     = false,
+    department_id = null, team_id = null, manager_id = null,
+    deleted_at = now()
+  where id = p_user;
+
+  -- Remove the login itself (Supabase also removes its sessions and identities).
+  delete from auth.users where id = p_user;
+  return n;
+end $$;
+
+revoke execute on function public.admin_delete_user(uuid, uuid) from public, anon;
+grant execute on function public.admin_delete_user(uuid, uuid) to authenticated;

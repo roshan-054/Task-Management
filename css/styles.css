@@ -603,3 +603,71 @@ body.is-dragging .col-empty { border-color: var(--accent); color: var(--accent);
 .logout-btn:hover { color: var(--red); background: var(--red-soft); }
 .only-sm { display: none; }
 @media (max-width: 860px) { .only-sm { display: inline-flex; } }
+
+/* v8: personal to-do list */
+.content.narrow { max-width: 760px; }
+.todo-add { display: flex; align-items: center; gap: 10px; padding: 6px 16px; margin-bottom: 14px; }
+.todo-plus { color: var(--accent); display: inline-flex; }
+.todo-input { flex: 1; border: 0; background: transparent; font: inherit; font-size: 16px; padding: 12px 0; color: var(--text); outline: none; }
+.todo-card { padding: 6px; }
+.todo-list { list-style: none; margin: 0; padding: 0; }
+.todo { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 4px 8px; border-radius: 12px; transition: background .15s, opacity .2s, transform .2s; }
+.todo:hover { background: var(--surface-2); }
+.todo + .todo { box-shadow: 0 -1px 0 var(--border); }
+.todo:hover, .todo:hover + .todo { box-shadow: none; }
+.todo.dragging { opacity: .4; }
+.todo.removing { opacity: 0; transform: translateX(16px); }
+.grip { color: var(--text-3); cursor: grab; display: inline-flex; opacity: 0; transition: opacity .15s; }
+.todo:hover .grip { opacity: 1; }
+.todo-check { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border-strong); background: transparent; color: transparent;
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: all .18s; padding: 0; }
+.todo-check:hover { border-color: var(--green); }
+.todo.is-done .todo-check, .todo.ticking .todo-check { background: var(--green); border-color: var(--green); color: #fff; transform: scale(1.08); }
+.todo-title { flex: 1; min-width: 0; font-size: 15px; overflow-wrap: anywhere; cursor: text; outline: none; }
+.todo.is-done .todo-title, .todo.ticking .todo-title { color: var(--text-3); text-decoration: line-through; }
+.todo-edit { flex: 1; height: 34px; }
+.todo-del { opacity: 0; color: var(--text-3); }
+.todo:hover .todo-del, .todo-del:focus-visible { opacity: 1; }
+.todo-del:hover { color: var(--red); }
+.todo-empty { display: grid; justify-items: center; gap: 4px; padding: 40px 16px; color: var(--text-2); text-align: center; }
+.todo-empty svg { color: var(--green); margin-bottom: 6px; }
+.todo-empty b { color: var(--text); }
+.todo-done { margin-top: 18px; }
+.todo-done summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; list-style: none; padding: 6px 8px; font-weight: 600; color: var(--text-2); font-size: 14px; }
+.todo-done summary::-webkit-details-marker { display: none; }
+.todo-done summary span::before { content: '›'; display: inline-block; margin-right: 8px; transition: transform .15s; }
+.todo-done[open] summary span::before { transform: rotate(90deg); }
+@media (hover: none) { .grip, .todo-del { opacity: 1; } }
+
+/* v8: notes */
+.notes { display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start; }
+.notes-list { padding: 10px; position: sticky; top: 84px; max-height: calc(100vh - 120px); display: flex; flex-direction: column; }
+.note-search { max-width: none; margin-bottom: 8px; }
+.note-items { overflow: auto; display: grid; gap: 2px; }
+.note-item { display: grid; gap: 2px; text-align: left; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.note-item:hover { background: var(--surface-2); }
+.note-item.active { background: var(--accent-soft); }
+.note-item b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
+.note-item span { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note-pin { color: var(--orange); display: inline-flex; }
+.note-editor { padding: 14px 22px 22px; min-height: 60vh; display: flex; flex-direction: column; }
+.note-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.note-bar .grow { flex: 1; }
+.note-bar .icon-btn.on { color: var(--orange); }
+.note-bar .icon-btn.armed { color: #fff; background: var(--red); }
+.note-title { border: 0; background: transparent; font: inherit; font-size: 24px; font-weight: 700; color: var(--text); padding: 8px 0; outline: none; letter-spacing: -0.01em; }
+.note-body { flex: 1; min-height: 50vh; border: 0; background: transparent; font: inherit; font-size: 15px; line-height: 1.6; color: var(--text); resize: none; outline: none; padding: 4px 0; }
+@media (max-width: 860px) {
+  .notes { grid-template-columns: 1fr; }
+  .notes-list { position: static; max-height: none; }
+  .notes.editing .notes-list { display: none; }
+  .notes:not(.editing) .note-editor { display: none; }
+}
+
+/* v9: delete user */
+.notice.danger-notice { background: var(--red-soft); }
+.notice.danger-notice svg { color: var(--red); }
+.btn.danger.solid { background: var(--red); color: #fff; }
+.btn.danger.solid:disabled { background: var(--red-soft); color: var(--red); opacity: .6; cursor: not-allowed; }
+#del-form .detail-grid { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 520px) { #del-form .detail-grid { grid-template-columns: 1fr; } }

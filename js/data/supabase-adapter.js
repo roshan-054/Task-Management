@@ -120,6 +120,11 @@ export class SupabaseAdapter {
   async adminResetPassword(userId, password) {
     unwrap(await this.sb.rpc('admin_reset_password', { p_user: userId, p_password: password }));
   }
+  async adminDeleteUser(userId, reassignTo = null) {
+    const { data, error } = await this.sb.rpc('admin_delete_user', { p_user: userId, p_reassign_to: reassignTo });
+    if (error) throw new Error(/admin_delete_user|schema cache/i.test(error.message) ? 'Run supabase/migrations/008_delete_user.sql in Supabase first.' : error.message);
+    return data;
+  }
   async deleteInvitation(email) {
     unwrap(await this.sb.from('invitations').delete().eq('email', email));
   }
@@ -156,6 +161,25 @@ export class SupabaseAdapter {
   async deleteRemark(id) {
     unwrap(await this.sb.from('task_remarks').delete().eq('id', id));
   }
+
+  // ---------- personal to-do & notes (private to each person) ----------
+  async personal(q) {
+    const { data, error } = await q;
+    if (error) {
+      if (/relation .* does not exist|schema cache|Could not find the table/i.test(error.message)) throw new Error('To-do and Notes need a one-time database update: run supabase/migrations/007_todos_notes.sql in Supabase.');
+      throw new Error(error.message);
+    }
+    return data;
+  }
+  async listTodos() { return this.personal(this.sb.from('todos').select('*').order('position')); }
+  async addTodo(title, position) { return this.personal(this.sb.from('todos').insert({ title, position }).select().single()); }
+  async updateTodo(id, patch) { return this.personal(this.sb.from('todos').update(patch).eq('id', id).select().single()); }
+  async deleteTodo(id) { await this.personal(this.sb.from('todos').delete().eq('id', id)); }
+  async clearDoneTodos() { await this.personal(this.sb.from('todos').delete().eq('done', true)); }
+  async listNotes() { return this.personal(this.sb.from('notes').select('*').order('updated_at', { ascending: false })); }
+  async addNote(n = {}) { return this.personal(this.sb.from('notes').insert({ title: n.title || '', body: n.body || '' }).select().single()); }
+  async updateNote(id, patch) { return this.personal(this.sb.from('notes').update(patch).eq('id', id).select().single()); }
+  async deleteNote(id) { await this.personal(this.sb.from('notes').delete().eq('id', id)); }
 
   // ---------- notifications ----------
   async listNotifications() {

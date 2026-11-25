@@ -108,6 +108,8 @@ export class LocalAdapter {
     const db = JSON.parse(raw);
     db.task_events ||= [];
     db.task_remarks ||= [];
+    db.todos ||= [];
+    db.notes ||= [];
     if (!db.platforms) {   // demo data saved before platforms existed
       const ops = db.departments.find((d) => d.name === 'Operations') || db.departments[0];
       db.platforms = ops ? ['Amazon', 'Custom', 'Other'].map((name) => ({ id: uid(), department_id: ops.id, name, archived: false, created_at: now() })) : [];
@@ -282,6 +284,36 @@ export class LocalAdapter {
     this.save(db); this.emit({ kind: 'directory' });
     return { needsConfirmation: false };
   }
+  async adminDeleteUser(userId, reassignTo = null) {
+    const db = this.db; const me = this.me(db);
+    if (me.role !== 'admin') throw new Error('Only an admin can delete users.');
+    if (userId === me.id) throw new Error('You cannot delete your own account.');
+    const t = db.profiles.find((p) => p.id === userId && !p.deleted_at); if (!t) throw new Error('User not found.');
+    if (t.role === 'admin' && !db.profiles.some((p) => p.role === 'admin' && p.active && !p.deleted_at && p.id !== userId)) throw new Error('You cannot delete the last admin.');
+    const open = db.tasks.filter((x) => x.assigned_to === userId && x.status !== 'completed');
+    if (reassignTo) {
+      const heir = db.profiles.find((p) => p.id === reassignTo && p.active && !p.deleted_at);
+      if (!heir || heir.id === userId) throw new Error('Choose an active person to take over their open tasks.');
+      open.forEach((x) => {
+        x.assigned_to = heir.id;
+        const pl = db.platforms.find((q) => q.id === x.platform_id);
+        if (!pl || pl.department_id !== heir.department_id) x.platform_id = null;
+        if (x.created_by !== heir.id) this.notify(db, heir.id, x, 'assigned', `${me.full_name} assigned you "${x.title}"`);
+      });
+    } else {
+      const ids = new Set(open.map((x) => x.id));
+      db.tasks = db.tasks.filter((x) => !ids.has(x.id));
+    }
+    db.todos = db.todos.filter((x) => x.user_id !== userId);
+    db.notes = db.notes.filter((x) => x.user_id !== userId);
+    db.notifications = db.notifications.filter((x) => x.user_id !== userId);
+    db.invitations = db.invitations.filter((i) => i.email.toLowerCase() !== t.email.toLowerCase());
+    db.profiles.forEach((p) => { if (p.manager_id === userId) p.manager_id = null; });
+    Object.assign(t, { full_name: (t.full_name || t.email.split('@')[0]) + ' (deleted)', email: `deleted+${t.id}@deleted.invalid`, title: '', role: 'member',
+      active: false, department_id: null, team_id: null, manager_id: null, deleted_at: now(), password: null });
+    this.save(db); this.emit({ kind: 'directory' }); this.emit({ kind: 'task' });
+    return open.length;
+  }
   async adminResetPassword(userId, password) {
     const db = this.db; this.requireAdmin(db);
     if (password.length < 8) throw new Error('Use at least 8 characters.');
@@ -440,6 +472,37 @@ export class LocalAdapter {
     db.notifications.forEach((n) => { if (n.user_id === me.id && ids.includes(n.id)) n.read = true; });
     this.save(db);
   }
+
+  // ---------- personal to-do & notes (mirrors migrations/007_todos_notes.sql) ----------
+  async listTodos() { const me = this.me(this.db); return clone(this.db.todos.filter((t) => t.user_id === me.id)).sort((a, b) => a.position - b.position); }
+  async addTodo(title, position) {
+    const db = this.db; const me = this.me(db);
+    title = (title || '').trim(); if (!title) throw new Error('Write something first.');
+    const t = { id: uid(), user_id: me.id, title: title.slice(0, 300), done: false, position: position ?? Date.now() / 1000, created_at: now(), done_at: null };
+    db.todos.push(t); this.save(db); return clone(t);
+  }
+  async updateTodo(id, patch) {
+    const db = this.db; const me = this.me(db);
+    const t = db.todos.find((x) => x.id === id && x.user_id === me.id); if (!t) throw new Error('Not found');
+    const was = t.done;
+    Object.assign(t, patch, { user_id: me.id });
+    if (t.done && !was) t.done_at = now(); if (!t.done) t.done_at = null;
+    this.save(db); return clone(t);
+  }
+  async deleteTodo(id) { const db = this.db; const me = this.me(db); db.todos = db.todos.filter((x) => !(x.id === id && x.user_id === me.id)); this.save(db); }
+  async clearDoneTodos() { const db = this.db; const me = this.me(db); db.todos = db.todos.filter((x) => !(x.user_id === me.id && x.done)); this.save(db); }
+  async listNotes() { const me = this.me(this.db); return clone(this.db.notes.filter((n) => n.user_id === me.id)).sort((a, b) => b.updated_at.localeCompare(a.updated_at)); }
+  async addNote(n = {}) {
+    const db = this.db; const me = this.me(db);
+    const note = { id: uid(), user_id: me.id, title: n.title || '', body: n.body || '', pinned: false, created_at: now(), updated_at: now() };
+    db.notes.push(note); this.save(db); return clone(note);
+  }
+  async updateNote(id, patch) {
+    const db = this.db; const me = this.me(db);
+    const n = db.notes.find((x) => x.id === id && x.user_id === me.id); if (!n) throw new Error('Not found');
+    Object.assign(n, patch, { user_id: me.id, updated_at: now() }); this.save(db); return clone(n);
+  }
+  async deleteNote(id) { const db = this.db; const me = this.me(db); db.notes = db.notes.filter((x) => !(x.id === id && x.user_id === me.id)); this.save(db); }
 
   // ---------- KPI (mirrors kpi_stats() in schema.sql) ----------
   async kpiPlatforms(scope, target = null) { return (await this.kpiStats(scope, target, { byPlatform: true })).flat(); }

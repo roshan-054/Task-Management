@@ -76,6 +76,8 @@ When a new version adds database changes, run the matching file in `supabase/mig
 | `004_people_admin.sql` | `profiles.manager_id` ("Reports to"), managers see KPIs of their direct reports, admin **Reset password** |
 | `005_status_notifications.sql` | The person who assigned a task is notified on every status change (started, resumed, on hold, completed, moved back) |
 | `006_platforms.sql` | Platform option on tasks (e.g. Amazon, Custom, Other), managed per department by its manager or an admin, with a per-platform performance breakdown. Seeds Amazon, Custom and Other for RevOps |
+| `007_todos_notes.sql` | Private To-do list and Notes for each person |
+| `008_delete_user.sql` | Admins can delete a user: removes their login, hands over or deletes their open tasks, keeps history as "Name (deleted)" |
 
 **Activating people from the panel with "Confirm email" on:** Supabase still sends them a confirmation email, and they must click it before their first sign-in. Supabase's built-in email service only sends a few emails per hour; if you add many people at once, set up custom SMTP under **Authentication → Emails**, or turn **Confirm email** off and use **Activate account now** when you add each person (so no invitation is left waiting for someone else to claim).
 

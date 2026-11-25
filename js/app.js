@@ -60,6 +60,10 @@ const icon = {
   chart: (s) => I('<path d="M5 20V10M12 20V4M19 20v-7"/>', s),
   team: (s) => I('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3 2.8-4.8 5.5-4.8s4.9 1.8 5.5 4.8"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.3c2.3.2 3.9 1.8 4.5 4.2"/>', s),
   people: (s) => I('<circle cx="12" cy="8" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/>', s),
+  list: (s) => I('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>', s),
+  note: (s) => I('<path d="M6 3.5h9l4 4v13H6z"/><path d="M14.5 3.5v4.5H19M9 12h7M9 15.5h7"/>', s),
+  pin: (s) => I('<path d="M9 4h6l-1 5 3 3v1.5H7V12l3-3z"/><path d="M12 13.5V20"/>', s),
+  grip: (s) => I('<circle cx="9" cy="7" r="1.2"/><circle cx="15" cy="7" r="1.2"/><circle cx="9" cy="12" r="1.2"/><circle cx="15" cy="12" r="1.2"/><circle cx="9" cy="17" r="1.2"/><circle cx="15" cy="17" r="1.2"/>', s),
   tag: (s) => I('<path d="M3.5 12.5V4.5a1 1 0 011-1h8l8 8-9 9z"/><circle cx="8.5" cy="8.5" r="1.6"/>', s),
   sound: (s) => I('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/>', s),
   muted: (s) => I('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>', s),
@@ -99,7 +103,7 @@ const statusIcon = { not_started: icon.circle, in_progress: icon.play, on_hold: 
 //  State
 // =====================================================================
 const state = {
-  me: null, profiles: [], departments: [], teams: [], tasks: [], notifications: [], invitations: [], remarks: [], platforms: [],
+  me: null, profiles: [], departments: [], teams: [], tasks: [], notifications: [], invitations: [], remarks: [], platforms: [], todos: [], notes: [], personalError: '',
   filter: { status: 'active', priority: 'all', platform: 'all', sort: 'due', q: '' },
   kpiSort: { key: 'score', dir: -1 },
 };
@@ -259,6 +263,7 @@ async function loadAll() {
     store.listRemarks().catch(() => []), store.listPlatforms().catch(() => []),
   ]);
   Object.assign(state, { profiles, departments, teams, tasks, notifications, remarks, platforms });
+  try { state.todos = await store.listTodos(); state.personalError = ''; } catch (e) { state.todos = []; state.personalError = e.message; }
   state.me = byId(profiles, state.me.id) || state.me;
 }
 let refreshTimer;
@@ -318,8 +323,12 @@ function navItems() {
     { hash: '#/tasks', label: 'My Tasks', ic: icon.check, count: () => myTasks().filter((t) => t.status !== 'completed').length },
     { hash: '#/waiting', label: 'Waiting on Me', ic: icon.at, count: () => waitingOnMe().length },
   ];
+  const personal = [{ section: 'Personal' },
+    { hash: '#/todo', label: 'To-do', ic: icon.list, count: () => state.todos.filter((t) => !t.done).length },
+    { hash: '#/notes', label: 'Notes', ic: icon.note }];
   if (isManager()) items.push({ hash: '#/assigned', label: 'Assigned by Me', ic: icon.send, count: () => assignedByMe().filter((t) => t.status !== 'completed').length });
   if (isAdmin()) items.push({ hash: '#/all', label: 'All Tasks', ic: icon.stack });
+  items.push(...personal);
   items.push({ section: 'Performance' });
   if (isManager()) items.push({ hash: '#/team-kpi', label: 'Team Performance', ic: icon.chart });
   else items.push({ hash: '#/kpi', label: 'My Performance', ic: icon.chart });
@@ -450,6 +459,8 @@ function route() {
   } else if (h === '#/kpi') { if (isManager()) { location.hash = '#/team-kpi'; return; } renderKpi(state.me.id); }
   else if (h.startsWith('#/kpi/')) renderKpi(decodeURIComponent(h.slice(6)));
   else if (h === '#/team-kpi' && isManager()) renderTeamKpi();
+  else if (h === '#/todo') renderTodos();
+  else if (h === '#/notes') renderNotes();
   else if (h === '#/people' && isManager()) renderPeople();
   else if (h === '#/platforms' && isManager()) renderPlatforms();
   else location.hash = '#/tasks';
@@ -1133,7 +1144,8 @@ async function renderTeamKpi() {
 // =====================================================================
 async function renderPeople() {
   try { state.invitations = await store.listInvitations(); } catch (e) { state.invitations = []; }
-  const visible = isAdmin() ? state.profiles : state.profiles.filter((p) => p.department_id === state.me.department_id || p.manager_id === state.me.id);
+  const live = state.profiles.filter((p) => !p.deleted_at);
+  const visible = isAdmin() ? live : live.filter((p) => p.department_id === state.me.department_id || p.manager_id === state.me.id);
   const depts = isAdmin() ? state.departments : state.departments.filter((d) => d.id === state.me.department_id);
   const pending = state.invitations.filter((i) => !i.accepted_at);
   const roleTone = { admin: 'purple', manager: 'blue', member: 'gray' };
@@ -1298,6 +1310,196 @@ function renderPlatforms() {
   }));
 }
 
+// =====================================================================
+//  Personal to-do list (private to each person)
+// =====================================================================
+const personalBlocked = () => state.personalError
+  ? `<div class="notice">${icon.info(18)}<div>${esc(state.personalError)}</div></div>` : '';
+
+async function renderTodos() {
+  try { state.todos = await store.listTodos(); state.personalError = ''; } catch (e) { state.personalError = e.message; }
+  const open = state.todos.filter((t) => !t.done).sort((a, b) => a.position - b.position);
+  const done = state.todos.filter((t) => t.done).sort((a, b) => (b.done_at || '').localeCompare(a.done_at || ''));
+  const item = (t) => `<li class="todo ${t.done ? 'is-done' : ''}" data-todo="${esc(t.id)}" ${t.done ? '' : 'draggable="true"'}>
+      ${t.done ? '' : `<span class="grip" aria-hidden="true">${icon.grip(16)}</span>`}
+      <button class="todo-check" data-toggle aria-label="${t.done ? 'Mark as not done' : 'Mark as done'}" aria-pressed="${t.done}">${icon.check(14)}</button>
+      <span class="todo-title" data-edit tabindex="0" title="Double-click to edit">${esc(t.title)}</span>
+      ${t.done && t.done_at ? `<span class="small muted">${esc(timeAgo(t.done_at))}</span>` : ''}
+      <button class="icon-btn todo-del" data-del aria-label="Delete">${icon.x(15)}</button>
+    </li>`;
+  const doneOpen = (() => { try { return localStorage.getItem('taskflow-todo-done') !== 'closed'; } catch { return true; } })();
+  $('#view').innerHTML = `
+  <section class="content narrow">
+    <div class="page-head"><div><h1>To-do</h1><p>Your private checklist for quick work. Only you can see it.</p></div></div>
+    ${personalBlocked()}
+    <form class="todo-add card" id="todo-add">
+      <span class="todo-plus">${icon.plus(18)}</span>
+      <input class="todo-input" id="todo-input" maxlength="300" placeholder="Add a to-do and press Enter" autocomplete="off" aria-label="New to-do" ${state.personalError ? 'disabled' : ''}>
+    </form>
+    <div class="card todo-card">
+      ${open.length ? `<ul class="todo-list" id="todo-open">${open.map(item).join('')}</ul>`
+        : `<div class="todo-empty">${icon.check(28)}<b>All clear</b><span>Nothing on your list. Add something above.</span></div>`}
+    </div>
+    ${done.length ? `<details class="todo-done" ${doneOpen ? 'open' : ''}><summary><span>Completed · ${done.length}</span>
+        <button class="btn ghost sm" id="todo-clear" type="button">Clear completed</button></summary>
+      <ul class="todo-list">${done.map(item).join('')}</ul></details>` : ''}
+    <p class="small muted" style="margin-top:12px">Tip: drag to reorder, double-click to edit.</p>
+  </section>`;
+
+  const input = $('#todo-input');
+  if (!state.personalError) input.focus();
+  $('#todo-add').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const title = input.value.trim(); if (!title) return;
+    const top = open.length ? Math.min(...open.map((t) => t.position)) - 1 : Date.now() / 1000;
+    input.value = '';
+    try { const t = await store.addTodo(title, top); state.todos.push(t); renderTodos(); updateCounts(); } catch (ex) { input.value = title; fail(ex); }
+  });
+  $('.todo-done')?.addEventListener('toggle', (e) => { try { localStorage.setItem('taskflow-todo-done', e.target.open ? 'open' : 'closed'); } catch {} });
+  $('#todo-clear')?.addEventListener('click', async (e) => {
+    e.preventDefault(); e.stopPropagation();
+    try { await store.clearDoneTodos(); state.todos = state.todos.filter((t) => !t.done); renderTodos(); toast('Completed to-dos cleared', '', 'gray', icon.trash); } catch (ex) { fail(ex); }
+  });
+  $$('[data-todo]').forEach((li) => {
+    const id = li.dataset.todo; const t = byId(state.todos, id);
+    $('[data-toggle]', li).addEventListener('click', async () => {
+      li.classList.add('ticking');
+      try {
+        Object.assign(t, await store.updateTodo(id, { done: !t.done }));
+        if (t.done) chime('green', { force: false });
+        setTimeout(() => { renderTodos(); updateCounts(); }, t.done ? 260 : 0);
+      } catch (ex) { li.classList.remove('ticking'); fail(ex); }
+    });
+    $('[data-del]', li).addEventListener('click', async () => {
+      li.classList.add('removing');
+      try { await store.deleteTodo(id); state.todos = state.todos.filter((x) => x.id !== id); setTimeout(() => { renderTodos(); updateCounts(); }, 180); } catch (ex) { li.classList.remove('removing'); fail(ex); }
+    });
+    const title = $('[data-edit]', li);
+    const startEdit = () => {
+      if ($('input', li)) return;
+      const ed = document.createElement('input');
+      ed.className = 'input todo-edit'; ed.value = t.title; ed.maxLength = 300; ed.setAttribute('aria-label', 'Edit to-do');
+      title.replaceWith(ed); ed.focus(); ed.select();
+      let fin = false;
+      const finish = async (ok) => {
+        if (fin) return; fin = true;
+        const v = ed.value.trim();
+        if (!ok || !v || v === t.title) { ed.replaceWith(title); return; }
+        try { Object.assign(t, await store.updateTodo(id, { title: v })); title.textContent = v; } catch (ex) { fail(ex); }
+        ed.replaceWith(title);
+      };
+      ed.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } if (e.key === 'Escape') finish(false); });
+      ed.addEventListener('blur', () => finish(true));
+    };
+    title.addEventListener('dblclick', startEdit);
+    title.addEventListener('keydown', (e) => { if (e.key === 'Enter') startEdit(); });
+  });
+  // Drag to reorder (open items only). The new position sits between its neighbours.
+  const list = $('#todo-open');
+  if (list) {
+    let dragging = null;
+    list.addEventListener('dragstart', (e) => { dragging = e.target.closest('[data-todo]'); if (!dragging) return; dragging.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragging.dataset.todo); });
+    list.addEventListener('dragover', (e) => {
+      if (!dragging) return; e.preventDefault();
+      const after = [...list.querySelectorAll('[data-todo]:not(.dragging)')].find((el) => e.clientY < el.getBoundingClientRect().top + el.offsetHeight / 2);
+      if (after) list.insertBefore(dragging, after); else list.appendChild(dragging);
+    });
+    list.addEventListener('dragend', async () => {
+      if (!dragging) return;
+      const el = dragging; dragging = null; el.classList.remove('dragging');
+      const ids = [...list.querySelectorAll('[data-todo]')].map((x) => x.dataset.todo);
+      const i = ids.indexOf(el.dataset.todo);
+      const pos = (k) => byId(state.todos, ids[k])?.position;
+      const prev = i > 0 ? pos(i - 1) : null, next = i < ids.length - 1 ? pos(i + 1) : null;
+      const np = prev === null ? next - 1 : next === null ? prev + 1 : (prev + next) / 2;
+      const t = byId(state.todos, el.dataset.todo);
+      if (t.position === np) return;
+      try { Object.assign(t, await store.updateTodo(t.id, { position: np })); } catch (ex) { fail(ex); renderTodos(); }
+    });
+  }
+}
+
+// =====================================================================
+//  Personal notes (private to each person), with autosave
+// =====================================================================
+let noteSel = null;
+async function renderNotes() {
+  try { state.notes = await store.listNotes(); state.personalError = ''; } catch (e) { state.notes = []; state.personalError = e.message; }
+  if (noteSel && !byId(state.notes, noteSel)) noteSel = null;
+  if (!noteSel && state.notes.length && !matchMedia('(max-width: 860px)').matches) noteSel = sortedNotes()[0].id;
+  drawNotes();
+}
+const sortedNotes = () => [...state.notes].sort((a, b) => (b.pinned - a.pinned) || b.updated_at.localeCompare(a.updated_at));
+const noteTitle = (n) => n.title.trim() || n.body.trim().split('\n')[0].slice(0, 60) || 'Untitled note';
+
+function drawNotes(q = $('#note-search')?.value || '') {
+  const ql = q.trim().toLowerCase();
+  const list = sortedNotes().filter((n) => !ql || (n.title + ' ' + n.body).toLowerCase().includes(ql));
+  const cur = noteSel ? byId(state.notes, noteSel) : null;
+  $('#view').innerHTML = `
+  <section class="content wide">
+    <div class="page-head"><div><h1>Notes</h1><p>Private notes that save as you type. Only you can see them.</p></div>
+      <button class="btn primary" id="note-new" ${state.personalError ? 'disabled' : ''}>${icon.plus(16)} New note</button></div>
+    ${personalBlocked()}
+    <div class="notes ${cur ? 'editing' : ''}">
+      <aside class="card notes-list">
+        <div class="search note-search">${icon.search(15)}<input id="note-search" placeholder="Search notes" value="${esc(q)}" aria-label="Search notes"></div>
+        <div class="note-items">${list.map((n) => `<button class="note-item ${n.id === noteSel ? 'active' : ''}" data-note="${esc(n.id)}">
+            <b>${n.pinned ? `<span class="note-pin">${icon.pin(12)}</span>` : ''}${esc(noteTitle(n))}</b>
+            <span>${esc(timeAgo(n.updated_at))}${n.body.trim() ? ' · ' + esc(n.body.trim().replace(/\s+/g, ' ').slice(0, 70)) : ''}</span>
+          </button>`).join('') || `<div class="small muted" style="padding:14px 6px">${ql ? 'No notes match.' : 'No notes yet. Press New note to start.'}</div>`}</div>
+      </aside>
+      <div class="card note-editor">
+        ${cur ? `<div class="note-bar">
+            <button class="btn ghost sm only-sm" id="note-back">‹ Notes</button>
+            <span class="small muted" id="note-status">Saved</span>
+            <div class="grow"></div>
+            <button class="icon-btn ${cur.pinned ? 'on' : ''}" id="note-pin" aria-pressed="${cur.pinned}" aria-label="${cur.pinned ? 'Unpin' : 'Pin to top'}" title="${cur.pinned ? 'Unpin' : 'Pin to top'}">${icon.pin(17)}</button>
+            <button class="icon-btn" id="note-del" aria-label="Delete note" title="Delete note">${icon.trash(17)}</button>
+          </div>
+          <input class="note-title" id="note-title" maxlength="200" placeholder="Title" value="${esc(cur.title)}" aria-label="Note title">
+          <textarea class="note-body" id="note-body" placeholder="Start writing…" aria-label="Note">${esc(cur.body)}</textarea>`
+        : `<div class="todo-empty">${icon.note(30)}<b>No note selected</b><span>Pick a note on the left or create a new one.</span></div>`}
+      </div>
+    </div>
+  </section>`;
+
+  const search = $('#note-search');
+  search.addEventListener('input', () => { const pos = search.selectionStart; drawNotes(search.value); const s2 = $('#note-search'); s2.focus(); s2.setSelectionRange(pos, pos); });
+  $('#note-new').addEventListener('click', async () => {
+    try { const n = await store.addNote(); state.notes.push(n); noteSel = n.id; drawNotes(''); $('#note-title')?.focus(); } catch (ex) { fail(ex); }
+  });
+  $$('[data-note]').forEach((b) => b.addEventListener('click', async () => { await flushNote(); noteSel = b.dataset.note; drawNotes(search.value); }));
+  if (!cur) return;
+  const status = $('#note-status');
+  const save = async () => {
+    const patch = { title: $('#note-title').value, body: $('#note-body').value };
+    if (patch.title === cur.title && patch.body === cur.body) { status.textContent = 'Saved'; return; }
+    status.textContent = 'Saving…';
+    try { Object.assign(cur, await store.updateNote(cur.id, patch)); status.textContent = 'Saved'; }
+    catch (ex) { status.textContent = 'Not saved'; fail(ex); }
+  };
+  let timer = null;
+  const queue = () => { status.textContent = 'Editing…'; clearTimeout(timer); timer = setTimeout(save, 600); };
+  flushNote = async () => { if (timer) { clearTimeout(timer); timer = null; await save(); } };
+  ['#note-title', '#note-body'].forEach((sel) => { $(sel).addEventListener('input', queue); $(sel).addEventListener('blur', () => flushNote()); });
+  $('#note-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#note-body').focus(); } });
+  $('#note-back')?.addEventListener('click', async () => { await flushNote(); noteSel = null; drawNotes(search.value); });
+  $('#note-pin').addEventListener('click', async () => {
+    await flushNote();
+    try { Object.assign(cur, await store.updateNote(cur.id, { pinned: !cur.pinned })); drawNotes(search.value); } catch (ex) { fail(ex); }
+  });
+  $('#note-del').addEventListener('click', async (e) => {
+    const b = e.currentTarget;
+    if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.classList.add('armed'); b.title = 'Click again to delete'; setTimeout(() => { b.dataset.confirm = ''; b.classList.remove('armed'); }, 3000); return; }
+    clearTimeout(timer); timer = null;
+    try { await store.deleteNote(cur.id); state.notes = state.notes.filter((n) => n.id !== cur.id); noteSel = null; flushNote = async () => {}; drawNotes(search.value); toast('Note deleted', '', 'gray', icon.trash); } catch (ex) { fail(ex); }
+  });
+}
+let flushNote = async () => {};
+window.addEventListener('hashchange', () => { flushNote(); });
+window.addEventListener('beforeunload', () => { flushNote(); });
+
 function genPassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
   const a = new Uint32Array(10); crypto.getRandomValues(a);
@@ -1439,6 +1641,7 @@ function openPersonEditor(p) {
       <div class="small muted">${esc(p.email)}</div>
     </div><div class="sheet-foot">
       ${p.id !== state.me.id ? `<button type="button" class="btn ${p.active ? 'danger' : ''} left" id="p-active">${p.active ? 'Deactivate' : 'Reactivate'}</button>` : ''}
+      ${p.id !== state.me.id && isAdmin() ? `<button type="button" class="btn danger" id="p-delete">${icon.trash(16)} Delete user</button>` : ''}
       <button type="button" class="btn" id="p-kpi">View KPIs</button>
       <button class="btn primary" type="submit">Save</button></div></form>`, (ov) => {
     $('#p-dept', ov).addEventListener('change', (e) => { $('#p-team', ov).innerHTML = teamOptions(e.target.value); });
@@ -1461,6 +1664,7 @@ function openPersonEditor(p) {
       } catch (ex) { b.disabled = false; b.dataset.confirm = ''; b.textContent = 'Reset password'; fail(new Error(/admin_reset_password|function/i.test(ex.message) && !/Only an admin/.test(ex.message) ? 'Run supabase/migrations/004_people_admin.sql in Supabase first.' : ex.message)); }
     });
     $('#p-kpi', ov).addEventListener('click', () => { closeSheet(); location.hash = '#/kpi/' + encodeURIComponent(p.id); });
+    $('#p-delete', ov)?.addEventListener('click', () => { closeSheet(true); openDeleteUser(p); });
     $('#p-active', ov)?.addEventListener('click', async () => {
       try { await store.updateProfile(p.id, { active: !p.active }); await loadAll(); closeSheet(); renderPeople(); } catch (ex) { fail(ex); }
     });
@@ -1470,6 +1674,54 @@ function openPersonEditor(p) {
         department_id: $('#p-dept', ov).value || null, team_id: $('#p-team', ov).value || null, manager_id: $('#p-mgr', ov).value || null };
       if (p.id !== state.me.id) patch.role = $('#p-role', ov).value;
       try { await store.updateProfile(p.id, patch); await loadAll(); closeSheet(); renderPeople(); toast('Saved', '', 'green', icon.check); } catch (ex) { fail(ex); }
+    });
+  });
+}
+
+// Admin-only: delete someone for good. Their login is removed, their open
+// tasks go to someone else (or are deleted), and finished work stays in the
+// history under "Name (deleted)".
+function openDeleteUser(p) {
+  const open = state.tasks.filter((t) => t.assigned_to === p.id && t.status !== 'completed');
+  const done = state.tasks.filter((t) => t.assigned_to === p.id && t.status === 'completed').length;
+  const given = state.tasks.filter((t) => t.created_by === p.id && t.assigned_to !== p.id).length;
+  const heirs = state.profiles.filter((x) => x.active && !x.deleted_at && x.id !== p.id).sort((a, b) => a.full_name.localeCompare(b.full_name));
+  const def = (p.manager_id && heirs.some((h) => h.id === p.manager_id)) ? p.manager_id : state.me.id;
+  const confirmWord = (p.full_name || p.email).trim();
+  openSheet(`${sheetHead('Delete ' + p.full_name)}
+    <form id="del-form"><div class="sheet-body">
+      <div class="notice danger-notice">${icon.alert(18)}<div><b>This cannot be undone.</b> ${esc(p.full_name)} will be signed out and can never log in again with ${esc(p.email)}. Their private to-dos and notes are deleted. Completed tasks, remarks and history stay, labelled "${esc(p.full_name)} (deleted)".</div></div>
+      <div class="detail-grid">
+        <div class="detail"><div class="k">Open tasks</div><div class="v">${open.length}</div></div>
+        <div class="detail"><div class="k">Completed tasks</div><div class="v">${done}</div></div>
+        <div class="detail"><div class="k">Tasks they assigned</div><div class="v">${given}</div></div>
+      </div>
+      ${open.length ? `<div class="field"><label for="del-heir">Their ${open.length} open task${open.length === 1 ? '' : 's'}</label>
+        <select class="select" id="del-heir">
+          ${heirs.map((h) => `<option value="${esc(h.id)}" ${h.id === def ? 'selected' : ''}>Give to ${esc(h.full_name)}${h.id === state.me.id ? ' (me)' : ''}${h.title ? ' — ' + esc(h.title) : ''}</option>`).join('')}
+          <option value="">Delete their open tasks too</option>
+        </select></div>` : ''}
+      <div class="field"><label for="del-confirm">Type <b>${esc(confirmWord)}</b> to confirm</label>
+        <input class="input" id="del-confirm" autocomplete="off" spellcheck="false" placeholder="${esc(confirmWord)}"></div>
+      <div class="error" id="del-error"></div>
+    </div><div class="sheet-foot">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="submit" class="btn danger solid" id="del-go" disabled>${icon.trash(16)} Delete user</button>
+    </div></form>`, (ov) => {
+    const go = $('#del-go', ov); const inp = $('#del-confirm', ov);
+    const norm = (x) => x.trim().toLowerCase().replace(/\s+/g, ' ');
+    inp.addEventListener('input', () => { go.disabled = norm(inp.value) !== norm(confirmWord); });
+    inp.focus();
+    $('#del-form', ov).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (go.disabled) return;
+      const heir = $('#del-heir', ov)?.value || null;
+      go.disabled = true; go.textContent = 'Deleting…';
+      try {
+        const n = await store.adminDeleteUser(p.id, heir);
+        await loadAll(); closeSheet(); renderPeople();
+        toast('User deleted', n ? (heir ? `${n} open task${n === 1 ? '' : 's'} moved to ${person(heir).full_name}.` : `${n} open task${n === 1 ? '' : 's'} deleted.`) : `${p.full_name} can no longer sign in.`, 'gray', icon.trash);
+      } catch (ex) { $('#del-error', ov).textContent = ex.message; go.disabled = false; go.innerHTML = `${icon.trash(16)} Delete user`; }
     });
   });
 }
