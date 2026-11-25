@@ -85,11 +85,11 @@ When a new version adds database changes, run the matching file in `supabase/mig
    git push -u origin main
    ```
 
-2. In the repository open **Settings → Pages** and set **Source** to **GitHub Actions**.
-3. The included workflow (`.github/workflows/deploy.yml`) publishes the site on every push to `main`. After the first run your app is at `https://roshan-054.github.io/Task-Management/`.
+2. In the repository open **Settings → Pages**, set **Source** to **Deploy from a branch**, choose **main** and **/ (root)**, and save.
+3. GitHub publishes the site on every push to `main`. Your app is at `https://<your-username>.github.io/<repo-name>/`.
 4. Make sure that URL is in Supabase's **Site URL / Redirect URLs** (step 3 above).
 
-Alternative without Actions: **Settings → Pages → Deploy from a branch → main / (root)**. The `.nojekyll` file is already included.
+The `.nojekyll` file is already included so GitHub serves the files as they are.
 
 ## Moving to another host later
 
@@ -109,7 +109,9 @@ js/data/index.js           Chooses the backend
 js/data/supabase-adapter.js  Supabase backend
 js/data/local-adapter.js   Demo backend (browser storage) and interface reference
 supabase/schema.sql        Tables, permission rules, notifications, KPI function
-.github/workflows/deploy.yml  GitHub Pages deployment
+icons/                     App icon, favicon and Apple touch icon
+manifest.webmanifest       Lets people install TaskFlow on their phone or desktop
+supabase/migrations/       Database updates for existing installs
 ```
 
 ## Security
