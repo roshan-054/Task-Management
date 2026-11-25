@@ -74,6 +74,24 @@ export class SupabaseAdapter {
   async renameTeam(id, name) {
     return unwrap(await this.sb.from('teams').update({ name }).eq('id', id).select().single());
   }
+  // Platforms (per department). Returns [] if migration 006 has not been run yet.
+  async listPlatforms() {
+    const { data, error } = await this.sb.from('platforms').select('*').order('name');
+    if (error) { console.warn('platforms:', error.message); return []; }
+    return data;
+  }
+  async createPlatform(department_id, name) {
+    return unwrap(await this.sb.from('platforms').insert({ department_id, name }).select().single());
+  }
+  async renamePlatform(id, name) {
+    return unwrap(await this.sb.from('platforms').update({ name }).eq('id', id).select().single());
+  }
+  async restorePlatform(id) {
+    return unwrap(await this.sb.from('platforms').update({ archived: false }).eq('id', id).select().single());
+  }
+  async removePlatform(id) {
+    return unwrap(await this.sb.rpc('remove_platform', { p_id: id }));
+  }
   async deleteTeam(id) {
     unwrap(await this.sb.from('teams').delete().eq('id', id));
   }
@@ -152,6 +170,11 @@ export class SupabaseAdapter {
   async kpiStats(scope, target = null) {
     return unwrap(await this.sb.rpc('kpi_stats', { scope, target }));
   }
+  async kpiPlatforms(scope, target = null) {
+    const { data, error } = await this.sb.rpc('kpi_platforms', { scope, target });
+    if (error) { console.warn('kpi_platforms:', error.message); return []; }
+    return data;
+  }
 
   // ---------- realtime ----------
   subscribe(userId, cb) {
@@ -163,6 +186,8 @@ export class SupabaseAdapter {
         () => cb({ kind: 'task' }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_remarks' },
         () => cb({ kind: 'task' }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'platforms' },
+        () => cb({ kind: 'directory' }))
       .subscribe();
     return () => { this.sb.removeChannel(this.channel); this.channel = null; };
   }

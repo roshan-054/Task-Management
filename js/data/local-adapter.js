@@ -52,7 +52,10 @@ function seed() {
     T('Share route plan for field visits', mSales, u1, 'completed', 'medium', daysFromNow(-2), { completed_at: hoursAgo(24 * 1.5) }),
     T('Clean up my inbox rules', u1, u1, 'not_started', 'low', null),
   ];
+  const platforms = ['Amazon', 'Custom', 'Other'].map((name) => ({ id: uid(), department_id: dOps, name, archived: false, created_at: now() }));
+  [[0, 0], [1, 1], [2, 0], [3, 2]].forEach(([ti, pi]) => { tasks[ti].platform_id = platforms[pi].id; });
   return {
+    platforms,
     departments: [{ id: dOps, name: 'Operations', created_at: now() }, { id: dSales, name: 'Sales', created_at: now() }],
     teams: [
       { id: tDel, name: 'Delivery', department_id: dOps }, { id: tSup, name: 'Support', department_id: dOps },
@@ -105,6 +108,10 @@ export class LocalAdapter {
     const db = JSON.parse(raw);
     db.task_events ||= [];
     db.task_remarks ||= [];
+    if (!db.platforms) {   // demo data saved before platforms existed
+      const ops = db.departments.find((d) => d.name === 'Operations') || db.departments[0];
+      db.platforms = ops ? ['Amazon', 'Custom', 'Other'].map((name) => ({ id: uid(), department_id: ops.id, name, archived: false, created_at: now() })) : [];
+    }
     return db;
   }
   save(db) { try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch {} }
@@ -200,6 +207,48 @@ export class LocalAdapter {
     if (db.teams.some((x) => x.id !== id && x.department_id === t.department_id && x.name.toLowerCase() === name.toLowerCase())) throw new Error('That team already exists in this department.');
     t.name = name; this.save(db); this.emit({ kind: 'directory' }); return clone(t);
   }
+  // ---------- platforms (mirrors migrations/006_platforms.sql) ----------
+  canManagePlatforms(me, deptId) { return me.role === 'admin' || (me.role === 'manager' && me.department_id === deptId); }
+  async listPlatforms() { return clone(this.db.platforms).sort((a, b) => a.name.localeCompare(b.name)); }
+  async createPlatform(department_id, name) {
+    const db = this.db; const me = this.me(db);
+    if (!this.canManagePlatforms(me, department_id)) throw new Error("Only this department's manager or an admin can add platforms.");
+    name = (name || '').trim(); if (!name || name.length > 60) throw new Error('Give the platform a name (up to 60 characters).');
+    if (db.platforms.some((p) => p.department_id === department_id && p.name.toLowerCase() === name.toLowerCase())) throw new Error('That platform already exists in this department.');
+    const p = { id: uid(), department_id, name, archived: false, created_by: me.id, created_at: now() };
+    db.platforms.push(p); this.save(db); this.emit({ kind: 'directory' }); return clone(p);
+  }
+  async renamePlatform(id, name) {
+    const db = this.db; const me = this.me(db);
+    const p = db.platforms.find((x) => x.id === id); if (!p) throw new Error('Not found');
+    if (!this.canManagePlatforms(me, p.department_id)) throw new Error("Only this department's manager or an admin can rename platforms.");
+    name = (name || '').trim(); if (!name || name.length > 60) throw new Error('Give the platform a name (up to 60 characters).');
+    if (db.platforms.some((x) => x.id !== id && x.department_id === p.department_id && x.name.toLowerCase() === name.toLowerCase())) throw new Error('That platform already exists in this department.');
+    p.name = name; this.save(db); this.emit({ kind: 'directory' }); return clone(p);
+  }
+  async restorePlatform(id) {
+    const db = this.db; const me = this.me(db);
+    const p = db.platforms.find((x) => x.id === id); if (!p) throw new Error('Not found');
+    if (!this.canManagePlatforms(me, p.department_id)) throw new Error("Only this department's manager or an admin can restore platforms.");
+    p.archived = false; this.save(db); this.emit({ kind: 'directory' }); return clone(p);
+  }
+  async removePlatform(id) {
+    const db = this.db; const me = this.me(db);
+    const p = db.platforms.find((x) => x.id === id); if (!p) throw new Error('Platform not found.');
+    if (!this.canManagePlatforms(me, p.department_id)) throw new Error("Only this department's manager or an admin can remove its platforms.");
+    let result;
+    if (db.tasks.some((t) => t.platform_id === id)) { p.archived = true; result = 'archived'; }
+    else { db.platforms = db.platforms.filter((x) => x.id !== id); result = 'deleted'; }
+    this.save(db); this.emit({ kind: 'directory' }); return result;
+  }
+  checkPlatform(db, platformId, assigneeId, isNewChoice) {
+    if (!platformId) return;
+    const p = db.platforms.find((x) => x.id === platformId);
+    if (!p) throw new Error('That platform no longer exists.');
+    if (p.archived && isNewChoice) throw new Error(`The platform "${p.name}" was removed. Choose another one.`);
+    const a = db.profiles.find((x) => x.id === assigneeId);
+    if (!a || a.department_id !== p.department_id) throw new Error(`The platform "${p.name}" belongs to another department than the assignee.`);
+  }
   async deleteTeam(id) {
     const db = this.db; this.requireAdmin(db);
     db.teams = db.teams.filter((t) => t.id !== id);
@@ -263,6 +312,7 @@ export class LocalAdapter {
     const db = this.db; const me = this.me(db);
     if (input.assigned_to !== me.id && !['admin', 'manager'].includes(me.role)) throw new Error('Members can only create tasks for themselves.');
     if (!input.title?.trim()) throw new Error('Give the task a title.');
+    this.checkPlatform(db, input.platform_id, input.assigned_to, true);
     const t = { id: uid(), description: '', status: 'not_started', priority: 'medium', due_date: null, links: [], ...input,
       created_by: me.id, created_at: now(), updated_at: now(), completed_at: input.status === 'completed' ? now() : null };
     if (['in_progress', 'completed'].includes(t.status)) t.started_at = now();
@@ -288,6 +338,10 @@ export class LocalAdapter {
       throw new Error('Only managers can assign tasks to other people.');
     const old = { ...t };
     const { created_by, created_at, ...rest } = patch;
+    const nextPlat = 'platform_id' in rest ? rest.platform_id : t.platform_id;
+    const nextAssignee = 'assigned_to' in rest ? rest.assigned_to : t.assigned_to;
+    if ((nextPlat || null) !== (t.platform_id || null) || nextAssignee !== t.assigned_to)
+      this.checkPlatform(db, nextPlat, nextAssignee, (nextPlat || null) !== (t.platform_id || null));
     Object.assign(t, rest, { updated_at: now() });
     if (t.status === 'completed' && old.status !== 'completed') t.completed_at = now();
     if (t.status !== 'completed') t.completed_at = null;
@@ -388,7 +442,8 @@ export class LocalAdapter {
   }
 
   // ---------- KPI (mirrors kpi_stats() in schema.sql) ----------
-  async kpiStats(scope, target = null) {
+  async kpiPlatforms(scope, target = null) { return (await this.kpiStats(scope, target, { byPlatform: true })).flat(); }
+  async kpiStats(scope, target = null, opts = {}) {
     const db = this.db; const me = this.me(db);
     const mayView = (p) => p.id === me.id || me.role === 'admin' || (me.role === 'manager' && (p.department_id === me.department_id || p.manager_id === me.id));
     const people = db.profiles.filter((p) => p.active && (
@@ -399,6 +454,18 @@ export class LocalAdapter {
     const weekStart = (() => { const d = new Date(); const day = (d.getDay() + 6) % 7; d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - day); return d; })();
     return people.map((p) => {
       const ts = db.tasks.filter((t) => t.assigned_to === p.id);
+      if (opts.byPlatform) {
+        const groups = new Map();
+        ts.forEach((t) => { const k = t.platform_id || null; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); });
+        return [...groups.entries()].map(([platform_id, g]) => ({
+          user_id: p.id, platform_id, total: g.length,
+          completed: g.filter((t) => t.status === 'completed').length,
+          open: g.filter((t) => t.status !== 'completed').length,
+          overdue_open: g.filter((t) => t.status !== 'completed' && t.due_date && t.due_date < today).length,
+          completed_on_time: g.filter((t) => t.status === 'completed' && (!t.due_date || t.completed_at.slice(0, 10) <= t.due_date)).length,
+          completed_late: g.filter((t) => t.status === 'completed' && t.due_date && t.completed_at.slice(0, 10) > t.due_date).length,
+        }));
+      }
       const done = ts.filter((t) => t.status === 'completed');
       const hrs = done.map((t) => (new Date(t.completed_at) - new Date(t.created_at)) / 3600e3);
       const weekly = [];

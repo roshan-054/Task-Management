@@ -60,6 +60,7 @@ const icon = {
   chart: (s) => I('<path d="M5 20V10M12 20V4M19 20v-7"/>', s),
   team: (s) => I('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3 2.8-4.8 5.5-4.8s4.9 1.8 5.5 4.8"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.3c2.3.2 3.9 1.8 4.5 4.2"/>', s),
   people: (s) => I('<circle cx="12" cy="8" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/>', s),
+  tag: (s) => I('<path d="M3.5 12.5V4.5a1 1 0 011-1h8l8 8-9 9z"/><circle cx="8.5" cy="8.5" r="1.6"/>', s),
   sound: (s) => I('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/>', s),
   muted: (s) => I('<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>', s),
   bell: (s) => I('<path d="M6 16V11a6 6 0 1112 0v5l1.5 2h-15L6 16z"/><path d="M10 20.5a2.2 2.2 0 004 0"/>', s),
@@ -98,8 +99,8 @@ const statusIcon = { not_started: icon.circle, in_progress: icon.play, on_hold: 
 //  State
 // =====================================================================
 const state = {
-  me: null, profiles: [], departments: [], teams: [], tasks: [], notifications: [], invitations: [], remarks: [],
-  filter: { status: 'active', priority: 'all', sort: 'due', q: '' },
+  me: null, profiles: [], departments: [], teams: [], tasks: [], notifications: [], invitations: [], remarks: [], platforms: [],
+  filter: { status: 'active', priority: 'all', platform: 'all', sort: 'due', q: '' },
   kpiSort: { key: 'score', dir: -1 },
 };
 let store;
@@ -110,6 +111,12 @@ const byId = (list, id) => list.find((x) => x.id === id);
 const person = (id) => byId(state.profiles, id) || { id, full_name: 'Unknown', email: '' };
 const deptName = (id) => byId(state.departments, id)?.name || 'No department';
 const teamName = (id) => byId(state.teams, id)?.name || 'No team';
+const platformOf = (id) => (id ? byId(state.platforms, id) : null);
+// Options for a department's platform picker: active ones, plus the task's current one even if removed.
+const platformsFor = (deptId, keepId = null) => state.platforms
+  .filter((p) => deptId && p.department_id === deptId && (!p.archived || p.id === keepId))
+  .sort((a, b) => a.name.localeCompare(b.name));
+const canManagePlatforms = (deptId) => isAdmin() || (state.me?.role === 'manager' && state.me.department_id === deptId);
 const isManager = () => ['manager', 'admin'].includes(state.me?.role);
 const isAdmin = () => state.me?.role === 'admin';
 const canEditTask = (t) => t.created_by === state.me.id || isAdmin();
@@ -247,11 +254,11 @@ function renderSetPassword() {
 //  Data loading
 // =====================================================================
 async function loadAll() {
-  const [profiles, departments, teams, tasks, notifications, remarks] = await Promise.all([
+  const [profiles, departments, teams, tasks, notifications, remarks, platforms] = await Promise.all([
     store.listProfiles(), store.listDepartments(), store.listTeams(), store.listTasks(), store.listNotifications(),
-    store.listRemarks().catch(() => []),
+    store.listRemarks().catch(() => []), store.listPlatforms().catch(() => []),
   ]);
-  Object.assign(state, { profiles, departments, teams, tasks, notifications, remarks });
+  Object.assign(state, { profiles, departments, teams, tasks, notifications, remarks, platforms });
   state.me = byId(profiles, state.me.id) || state.me;
 }
 let refreshTimer;
@@ -316,7 +323,7 @@ function navItems() {
   items.push({ section: 'Performance' });
   if (isManager()) items.push({ hash: '#/team-kpi', label: 'Team Performance', ic: icon.chart });
   else items.push({ hash: '#/kpi', label: 'My Performance', ic: icon.chart });
-  if (isManager()) { items.push({ section: 'Organisation' }); items.push({ hash: '#/people', label: 'People & Teams', ic: icon.team }); }
+  if (isManager()) { items.push({ section: 'Organisation' }); items.push({ hash: '#/people', label: 'People & Teams', ic: icon.team }); items.push({ hash: '#/platforms', label: 'Platforms', ic: icon.tag }); }
   return items;
 }
 const remarksFor = (taskId) => state.remarks.filter((r) => r.task_id === taskId);
@@ -439,6 +446,7 @@ function route() {
   else if (h.startsWith('#/kpi/')) renderKpi(decodeURIComponent(h.slice(6)));
   else if (h === '#/team-kpi' && isManager()) renderTeamKpi();
   else if (h === '#/people' && isManager()) renderPeople();
+  else if (h === '#/platforms' && isManager()) renderPlatforms();
   else location.hash = '#/tasks';
   updateCounts();
 }
@@ -471,9 +479,18 @@ function renderTaskView() {
   const mode = getViewMode();
   const base = viewTasks();
   const q = f.q.trim().toLowerCase();
-  const searched = q ? base.filter((t) => [t.title, t.description, person(t.assigned_to).full_name, person(t.created_by).full_name]
+  const searched = q ? base.filter((t) => [t.title, t.description, person(t.assigned_to).full_name, person(t.created_by).full_name, platformOf(t.platform_id)?.name]
     .some((s) => (s || '').toLowerCase().includes(q))) : base;
+  // Platform filter: list platforms used by these tasks plus the active ones of my department.
+  const platIds = new Set(base.map((t) => t.platform_id).filter(Boolean));
+  state.platforms.forEach((pl) => { if (!pl.archived && pl.department_id === state.me.department_id) platIds.add(pl.id); });
+  const platChoices = [...platIds].map(platformOf).filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name) || deptName(a.department_id).localeCompare(deptName(b.department_id)));
+  const multiDept = new Set(platChoices.map((pl) => pl.department_id)).size > 1;
+  if (f.platform !== 'all' && f.platform !== 'none' && !platIds.has(f.platform)) f.platform = 'all';
   let pool = f.priority === 'all' ? searched : searched.filter((t) => t.priority === f.priority);
+  if (f.platform === 'none') pool = pool.filter((t) => !t.platform_id);
+  else if (f.platform !== 'all') pool = pool.filter((t) => t.platform_id === f.platform);
   const counts = { active: pool.filter((t) => t.status !== 'completed').length, all: pool.length };
   STATUSES.forEach((s) => { counts[s.id] = pool.filter((t) => t.status === s.id).length; });
   const sorter = (a, b) => {
@@ -506,6 +523,11 @@ function renderTaskView() {
       <select class="select" id="f-prio" aria-label="Priority filter">
         <option value="all">All priorities</option>${PRIORITIES.map((p) => `<option value="${p.id}" ${f.priority === p.id ? 'selected' : ''}>${p.label}</option>`).join('')}
       </select>
+      ${platChoices.length ? `<select class="select" id="f-plat" aria-label="Platform filter">
+        <option value="all">All platforms</option>
+        ${platChoices.map((pl) => `<option value="${esc(pl.id)}" ${f.platform === pl.id ? 'selected' : ''}>${esc(pl.name)}${multiDept ? ` · ${esc(deptName(pl.department_id))}` : ''}${pl.archived ? ' (removed)' : ''}</option>`).join('')}
+        <option value="none" ${f.platform === 'none' ? 'selected' : ''}>No platform</option>
+      </select>` : ''}
       <select class="select" id="f-sort" aria-label="Sort">
         <option value="due" ${f.sort === 'due' ? 'selected' : ''}>Sort by due date</option>
         <option value="priority" ${f.sort === 'priority' ? 'selected' : ''}>Sort by priority</option>
@@ -520,6 +542,7 @@ function renderTaskView() {
   $$('[data-status]').forEach((b) => b.addEventListener('click', () => { f.status = b.dataset.status; renderTaskView(); }));
   $('#f-prio').addEventListener('change', (e) => { f.priority = e.target.value; renderTaskView(); });
   $('#f-sort').addEventListener('change', (e) => { f.sort = e.target.value; renderTaskView(); });
+  $('#f-plat')?.addEventListener('change', (e) => { f.platform = e.target.value; renderTaskView(); });
   $$('.tcard').forEach((el) => {
     el.addEventListener('click', (e) => { if (!e.target.closest('select, a, button')) openTask(byId(state.tasks, el.dataset.id)); });
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === el) openTask(byId(state.tasks, el.dataset.id)); });
@@ -625,6 +648,11 @@ function dueChip(t) {
     <span>${esc(d.label)}</span></span>`;
 }
 
+function platformChip(t) {
+  const pl = platformOf(t.platform_id);
+  return pl ? `<span class="plat-chip" title="Platform: ${esc(pl.name)}${pl.archived ? ' (removed)' : ''}">${icon.tag(12)}${esc(pl.name)}</span>` : '';
+}
+
 function personChip(label, p) {
   return `<div class="who-block"><span class="k">${label}</span><span class="v">${avatar(p, 'sm')}<span>${p.id === state.me.id ? 'You' : esc(p.full_name)}</span></span></div>`;
 }
@@ -641,6 +669,7 @@ function taskCard(t, i = 0) {
   <article class="tcard ${t.status === 'completed' ? 'done' : ''}" data-id="${esc(t.id)}" style="--prio:${p.color};animation-delay:${Math.min(i, 12) * 30}ms" tabindex="0" ${canStatus ? 'draggable="true"' : ''}>
     <div class="tcard-top">
       <span class="pill tone-${p.tone}">${p.label}</span>
+      ${platformChip(t)}
       ${dueChip(t)}
       ${locked ? `<span class="lock" title="Assigned by someone else. You can update the status only.">${icon.lock(13)}</span>` : ''}
       ${canEditTask(t) ? `<button type="button" class="card-del" data-card-del="${esc(t.id)}" aria-label="Delete task" title="Delete task">${icon.trash(14)}<span>Delete?</span></button>` : ''}
@@ -811,6 +840,7 @@ function openTask(t) {
       <div class="detail-grid">
         <div class="detail"><div class="k">Priority</div><div class="v"><span class="pill tone-${p.tone}">${p.label}</span></div></div>
         <div class="detail"><div class="k">Due date</div><div class="v ${overdue ? 'overdue' : ''}" style="${overdue ? 'color:var(--red)' : ''}">${t.due_date ? esc(fmtDate(t.due_date)) : 'No due date'}</div></div>
+        ${t.platform_id ? `<div class="detail"><div class="k">Platform</div><div class="v">${platformChip(t)}</div></div>` : ''}
         <div class="detail"><div class="k">Assigned by</div><div class="v">${avatar(creator, 'sm')} ${esc(creator.full_name)}</div></div>
         <div class="detail"><div class="k">Assigned to</div><div class="v">${avatar(assignee, 'sm')} ${esc(assignee.full_name)}</div></div>
       </div>
@@ -860,7 +890,7 @@ function linkRow(l = { label: '', url: '' }) {
 
 function openTaskEditor(t = null) {
   const editing = !!t;
-  const data = t || { title: '', description: '', priority: 'medium', status: 'not_started', due_date: '', links: [], assigned_to: isManager() ? '' : state.me.id };
+  const data = t || { title: '', description: '', priority: 'medium', status: 'not_started', due_date: '', links: [], platform_id: null, assigned_to: isManager() ? '' : state.me.id };
   openSheet(`${sheetHead(editing ? 'Edit task' : 'New task')}
     <form id="task-form" novalidate><div class="sheet-body">
       <div class="field"><label for="t-title">Title</label><input class="input" id="t-title" maxlength="200" placeholder="What needs to be done?" value="${esc(data.title)}" required></div>
@@ -868,6 +898,7 @@ function openTaskEditor(t = null) {
       <div class="field"><label for="t-assignee">Assign to</label>
         <select class="select" id="t-assignee" ${isManager() ? '' : 'disabled'}>${assigneeOptions(data.assigned_to)}</select>
         ${isManager() ? '' : '<span class="small muted">Team members can add tasks for themselves. Managers can assign to anyone.</span>'}</div>
+      <div class="field" id="plat-field" hidden></div>
       <div class="row">
         <div class="field"><label for="t-prio">Priority</label><select class="select" id="t-prio">${PRIORITIES.map((p) => `<option value="${p.id}" ${p.id === data.priority ? 'selected' : ''}>${p.label}</option>`).join('')}</select></div>
         <div class="field"><label for="t-due">Due date</label><input class="input" type="date" id="t-due" value="${esc(data.due_date || '')}"></div>
@@ -885,6 +916,23 @@ function openTaskEditor(t = null) {
       <button type="submit" class="btn primary">${editing ? 'Save changes' : 'Create task'}</button>
     </div></form>`, (ov) => {
     if (editing) { loadHistory(t, ov); renderRemarks(t, ov); }
+    // Platform picker follows the assignee's department; hidden when that department has none.
+    let chosenPlat = data.platform_id || '';
+    const renderPlat = () => {
+      const box = $('#plat-field', ov);
+      const assignee = person($('#t-assignee', ov).value || data.assigned_to);
+      const opts = platformsFor(assignee.department_id, data.platform_id);
+      if (!opts.some((o) => o.id === chosenPlat)) chosenPlat = '';
+      box.hidden = !opts.length;
+      box.innerHTML = opts.length ? `<label>Platform</label>
+        <div class="plat-pick" role="radiogroup" aria-label="Platform">
+          ${opts.map((o) => `<button type="button" role="radio" aria-checked="${o.id === chosenPlat}" class="${o.id === chosenPlat ? 'on' : ''}" data-plat="${esc(o.id)}">${icon.tag(13)}${esc(o.name)}${o.archived ? ' (removed)' : ''}</button>`).join('')}
+          <button type="button" role="radio" aria-checked="${!chosenPlat}" class="none ${chosenPlat ? '' : 'on'}" data-plat="">None</button>
+        </div>` : '';
+      $$('[data-plat]', box).forEach((b) => b.addEventListener('click', () => { chosenPlat = b.dataset.plat; renderPlat(); }));
+    };
+    renderPlat();
+    $('#t-assignee', ov).addEventListener('change', renderPlat);
     const linksEl = $('#links', ov);
     const bindRm = () => $$('[data-rm]', linksEl).forEach((b) => { b.onclick = () => b.closest('.link-row').remove(); });
     bindRm();
@@ -908,6 +956,8 @@ function openTaskEditor(t = null) {
         status: $('#t-status', ov).value,
         links,
       };
+      // Only send platform_id when platforms exist, so databases without migration 006 keep working.
+      if (state.platforms.length || data.platform_id) payload.platform_id = chosenPlat || null;
       if (!payload.title) { err.textContent = 'Give the task a title.'; return; }
       if (!payload.assigned_to) { err.textContent = 'Choose who this task is for.'; $('#t-assignee', ov).focus(); return; }
       if (bad) { err.textContent = `"${bad.url}" is not a valid link.`; return; }
@@ -982,17 +1032,43 @@ function kpiBody(k, p, hero = null) {
     <p class="small muted" style="margin-top:14px">Score = 40% completion rate + 40% on-time delivery + 20% open tasks not overdue.</p>`;
 }
 
+// Per-platform performance table, from kpi_platforms() rows (one per person x platform).
+function platformBreakdown(rows) {
+  if (!rows.some((r) => r.platform_id)) return '';
+  const by = new Map();
+  rows.forEach((r) => {
+    const k = r.platform_id || '';
+    const a = by.get(k) || { total: 0, completed: 0, open: 0, overdue_open: 0, completed_on_time: 0, completed_late: 0 };
+    Object.keys(a).forEach((f) => { a[f] += r[f] || 0; });
+    by.set(k, a);
+  });
+  const list = [...by.entries()].map(([id, a]) => ({ id, pl: platformOf(id), ...a }))
+    .sort((x, y) => (x.id ? 0 : 1) - (y.id ? 0 : 1) || y.total - x.total);
+  const multiDept = new Set(list.filter((r) => r.pl).map((r) => r.pl.department_id)).size > 1;
+  const max = Math.max(1, ...list.map((r) => r.total));
+  return `<div class="card" style="margin-top:16px"><h2>By platform</h2>
+    <div class="table-wrap"><table class="table plat-table"><thead><tr><th>Platform</th><th>Tasks</th><th>Completed</th><th>On time</th><th>Open</th><th>Overdue</th></tr></thead><tbody>
+    ${list.map((r) => `<tr>
+      <td>${r.pl ? `<span class="plat-chip">${icon.tag(12)}${esc(r.pl.name)}</span>${multiDept ? ` <span class="small muted">${esc(deptName(r.pl.department_id))}</span>` : ''}${r.pl.archived ? ' <span class="small muted">(removed)</span>' : ''}` : '<span class="muted">No platform</span>'}</td>
+      <td><div style="display:flex;align-items:center;gap:8px"><div class="meter"><div style="width:${(r.total / max) * 100}%"></div></div>${r.total}</div></td>
+      <td>${r.completed} <span class="small muted">${r.total ? pct(r.completed / r.total) : ''}</span></td>
+      <td>${r.completed ? pct(r.completed_on_time / r.completed) : '—'}</td>
+      <td>${r.open}</td>
+      <td style="${r.overdue_open ? 'color:var(--red);font-weight:600' : ''}">${r.overdue_open}</td>
+    </tr>`).join('')}</tbody></table></div></div>`;
+}
+
 async function renderKpi(userId) {
   const self = userId === state.me.id;
   $('#view').innerHTML = `<section class="content"><div class="page-head"><div><h1>${self ? 'My Performance' : 'Performance'}</h1><p>${self ? 'Your KPI profile, built from the tasks assigned to you.' : ''}</p></div></div><div class="boot" style="min-height:200px"><div class="spinner"></div></div></section>`;
   try {
-    const rows = await store.kpiStats(self ? 'me' : 'user', self ? null : userId);
+    const [rows, platRows] = await Promise.all([store.kpiStats(self ? 'me' : 'user', self ? null : userId), store.kpiPlatforms(self ? 'me' : 'user', self ? null : userId).catch(() => [])]);
     if (!rows.length) { $('#view .content').innerHTML = `<div class="empty"><h3>Not available</h3><p>You can view KPIs for people in your department only.</p></div>`; return; }
     const k = computeKpi(rows[0]);
     const p = person(userId);
     $('#view .content').innerHTML = `
       <div class="page-head"><div>${self ? '' : `<button class="btn ghost" style="padding-left:0" onclick="location.hash='#/team-kpi'">‹ Back</button>`}<h1>${self ? 'My Performance' : esc(p.full_name)}</h1>
-      <p>${self ? 'Your KPI profile, built from the tasks assigned to you.' : 'KPI profile'}</p></div></div>${kpiBody(k, p)}`;
+      <p>${self ? 'Your KPI profile, built from the tasks assigned to you.' : 'KPI profile'}</p></div></div>${kpiBody(k, p)}${platformBreakdown(platRows)}`;
     animateRings();
   } catch (e) { fail(e); }
 }
@@ -1001,7 +1077,8 @@ async function renderTeamKpi() {
   const title = 'Team Performance';
   $('#view').innerHTML = `<section class="content"><div class="page-head"><div><h1>${title}</h1><p>${isAdmin() ? 'Combined performance of everyone, across all departments.' : `Combined performance of everyone in ${esc(deptName(state.me.department_id))}.`}</p></div></div><div class="boot" style="min-height:200px"><div class="spinner"></div></div></section>`;
   try {
-    const rows = (await store.kpiStats('department')).map(computeKpi).map((k) => ({ ...k, p: person(k.user_id) }));
+    const [rawRows, platRows] = await Promise.all([store.kpiStats('department'), store.kpiPlatforms('department').catch(() => [])]);
+    const rows = rawRows.map(computeKpi).map((k) => ({ ...k, p: person(k.user_id) }));
     const s = state.kpiSort;
     const val = (r) => s.key === 'name' ? r.p.full_name : s.key === 'team' ? teamName(r.p.team_id) : (r[s.key] ?? -1);
     rows.sort((a, b) => { const x = val(a), y = val(b); return (typeof x === 'string' ? x.localeCompare(y) : x - y) * s.dir; });
@@ -1023,6 +1100,7 @@ async function renderTeamKpi() {
     $('#view .content').innerHTML = `
       <div class="page-head"><div><h1>${title}</h1><p>${isAdmin() ? 'Combined performance of everyone, across all departments.' : `Combined performance of everyone in ${esc(deptName(state.me.department_id))}.`}</p></div></div>
       ${kpiBody(team, null, heroInfo)}
+      ${platformBreakdown(platRows)}
       <div class="card" style="margin-top:16px"><h2>Team members</h2>
         ${rows.length ? `<div class="table-wrap"><table class="table"><thead><tr>
           ${th('name', 'Member')}${th('team', 'Team')}${th('score', 'Score')}${th('completionRate', 'Completion')}${th('onTimeRate', 'On time')}${th('open', 'Open')}${th('overdue_open', 'Overdue')}
@@ -1147,6 +1225,72 @@ async function renderPeople() {
   });
   $$('[data-del-dept]').forEach((b) => confirmDel(b, () => store.deleteDepartment(b.dataset.delDept)));
   $$('[data-del-team]').forEach((b) => confirmDel(b, () => store.deleteTeam(b.dataset.delTeam)));
+}
+
+// =====================================================================
+//  Platforms (per department; managers manage their own department's)
+// =====================================================================
+function renderPlatforms() {
+  const depts = isAdmin() ? state.departments : state.departments.filter((d) => d.id === state.me.department_id);
+  const usage = (id) => state.tasks.filter((t) => t.platform_id === id).length;
+  $('#view').innerHTML = `
+  <section class="content">
+    <div class="page-head"><div><h1>Platforms</h1><p>${isAdmin() ? 'Each department has its own platform list. Managers can edit their own department\'s list.' : `The platform options people in ${esc(deptName(state.me.department_id))} can pick on a task.`}</p></div></div>
+    ${depts.length ? `<div class="grid ${depts.length > 1 ? 'cols-2' : ''}" style="align-items:start">${depts.map((d) => {
+      const active = state.platforms.filter((p) => p.department_id === d.id && !p.archived).sort((a, b) => a.name.localeCompare(b.name));
+      const removed = state.platforms.filter((p) => p.department_id === d.id && p.archived).sort((a, b) => a.name.localeCompare(b.name));
+      const can = canManagePlatforms(d.id);
+      return `<div class="card plat-card" data-dept="${esc(d.id)}"><h2>${esc(d.name)}</h2>
+        <div class="plat-list">${active.map((p) => `<div class="plat-row" data-rename-box>
+            <span class="plat-chip">${icon.tag(12)}<span data-name>${esc(p.name)}</span></span>
+            <span class="small muted">${usage(p.id) ? `${usage(p.id)} task${usage(p.id) === 1 ? '' : 's'}` : ''}</span>
+            ${can ? `<button class="icon-btn" data-plat-rename="${esc(p.id)}" data-current="${esc(p.name)}" aria-label="Rename ${esc(p.name)}" title="Rename">${icon.pencil(15)}</button>
+            <button class="icon-btn" data-plat-remove="${esc(p.id)}" aria-label="Remove ${esc(p.name)}" title="Remove">${icon.trash(15)}</button>` : ''}
+          </div>`).join('') || `<div class="small muted" style="padding:6px 2px">No platforms yet. The platform field stays hidden on tasks for this department until you add one.</div>`}</div>
+        ${can ? `<form class="plat-add" data-add-plat="${esc(d.id)}"><input class="input" maxlength="60" placeholder="Add a platform, e.g. Flipkart" aria-label="New platform for ${esc(d.name)}">
+          <button class="btn primary sm" type="submit">${icon.plus(14)} Add</button></form>` : ''}
+        ${removed.length ? `<div class="small muted" style="margin-top:14px;font-weight:600">Removed (still shown on older tasks)</div>
+          ${removed.map((p) => `<div class="plat-row removed"><span class="plat-chip">${icon.tag(12)}${esc(p.name)}</span><span class="small muted">${usage(p.id) ? `${usage(p.id)} task${usage(p.id) === 1 ? '' : 's'}` : ''}</span>
+            ${can ? `<button class="btn ghost sm" data-plat-restore="${esc(p.id)}">Restore</button>` : ''}</div>`).join('')}` : ''}
+      </div>`;
+    }).join('')}</div>` : `<div class="empty"><h3>No department</h3><p>Ask an admin to put you in a department to manage its platforms.</p></div>`}
+  </section>`;
+
+  const reload = async () => { state.platforms = await store.listPlatforms(); renderPlatforms(); };
+  $$('[data-add-plat]').forEach((f) => f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = $('input', f); const name = input.value.trim();
+    if (!name) return input.focus();
+    try { await store.createPlatform(f.dataset.addPlat, name); await reload(); toast('Platform added', `"${name}" is now an option on tasks.`, 'green', icon.tag); $(`[data-add-plat="${f.dataset.addPlat}"] input`)?.focus(); }
+    catch (ex) { fail(ex); }
+  }));
+  $$('[data-plat-rename]').forEach((b) => b.addEventListener('click', () => {
+    const box = b.closest('[data-rename-box]'); const name = $('[data-name]', box);
+    if ($('input', box)) return;
+    const input = document.createElement('input');
+    input.className = 'input rename-input'; input.value = b.dataset.current; input.maxLength = 60; input.setAttribute('aria-label', 'New name');
+    name.replaceWith(input); input.focus(); input.select();
+    let done = false;
+    const finish = async (ok) => {
+      if (done) return; done = true;
+      const v = input.value.trim();
+      if (!ok || !v || v === b.dataset.current) { input.replaceWith(name); return; }
+      try { await store.renamePlatform(b.dataset.platRename, v); await reload(); toast('Renamed', `Now called "${v}".`, 'green', icon.check); }
+      catch (ex) { input.replaceWith(name); fail(ex); }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } if (e.key === 'Escape') { e.stopPropagation(); finish(false); } });
+    input.addEventListener('blur', () => finish(true));
+  }));
+  $$('[data-plat-remove]').forEach((b) => b.addEventListener('click', async () => {
+    if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.classList.add('armed'); b.title = 'Click again to remove'; setTimeout(() => { b.dataset.confirm = ''; b.classList.remove('armed'); }, 3000); return; }
+    try {
+      const r = await store.removePlatform(b.dataset.platRemove); await reload();
+      toast('Platform removed', r === 'archived' ? 'Older tasks keep it, but it can no longer be picked.' : '', 'gray', icon.trash);
+    } catch (ex) { fail(ex); }
+  }));
+  $$('[data-plat-restore]').forEach((b) => b.addEventListener('click', async () => {
+    try { await store.restorePlatform(b.dataset.platRestore); await reload(); toast('Platform restored', '', 'green', icon.check); } catch (ex) { fail(ex); }
+  }));
 }
 
 function genPassword() {
