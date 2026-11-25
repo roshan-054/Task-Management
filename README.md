@@ -6,13 +6,16 @@ A team task manager with roles, live completion alerts and KPI profiles. It is a
 
 | Area | Details |
 |---|---|
-| **Roles** | **Admin** manages everyone, departments and teams. **Manager** assigns tasks to anyone in any team and adds members to their department. **Member** works on assigned tasks and can add personal tasks. |
+| **Roles** | **Admin** manages everyone, departments and teams. **Manager** assigns tasks to anyone in any team and adds team members to their department. **Team member** works on assigned tasks and can add personal tasks. |
+| **Adding people** | Admins and managers add a person and can activate their account on the spot with a temporary password (copied for you to share), or let them activate it themselves. |
 | **Login** | Email and password. Only people an admin or manager has added can create an account, and each person only sees their own data. |
 | **Tasks** | Title, details, assignee, priority (Urgent, High, Medium, Low), due date, work status (Not started, In progress, On hold, Completed) and any number of related links shown as clickable chips. |
 | **Assigned tasks are locked** | When a manager assigns a task, the assignee can only change its work status. The database enforces this, not just the screen. |
 | **Manager view** | "Assigned by Me" lists only the tasks that manager created. Managers do not see other managers' tasks. |
 | **Live alerts** | The assigning manager gets an instant in-app alert (and an optional desktop notification) when a task is completed or put on hold. Assignees are alerted when a task is assigned to them. |
-| **KPI profiles** | Every person has a profile with a score, completion rate, on-time delivery, average time to complete, overdue count, status breakdown and weekly completions. Members see their own. Managers see everyone in their department; admins see everyone. |
+| **Board & cards** | Tasks show as a drag-and-drop board (one column per status) or as cards. Every card shows priority, due date, links, **Assigned by** and **Assigned to**. |
+| **Completion time & history** | The exact date and time a task is started and completed is recorded automatically, and every status change is logged in `task_events` (who, from, to, when) for future analytics. |
+| **KPI profiles** | Every person has a profile with a score, completion rate, on-time delivery, average time to complete, overdue count, status breakdown and weekly completions. Team members see **My Performance**. Managers and admins see **Team Performance**: the combined figures for their department (admins: everyone) plus each person's profile. |
 
 **KPI score** = 40% completion rate + 40% on-time delivery + 20% open tasks not overdue. Change the weights in `js/kpi.js`.
 
@@ -60,6 +63,16 @@ The free tier covers 50,000 monthly active users and 500 MB of database, far mor
    The anon key is designed to be public. What each user can read or change is decided by the security rules in the database, never by this key. **Never** put the `service_role` key in this file.
 5. **Create the first admin.** Open [`supabase/make-admin.sql`](supabase/make-admin.sql), replace `you@example.com` with your email, paste it into **SQL Editor** and press **Run**. Then open the app, choose **Activate your account** and sign up with that email. No one else can become admin.
 6. **Build your organisation.** As admin, go to **People & Teams**: add departments and teams, then **Add person** for each manager and member. Each person opens the app, chooses **Activate your account** and signs up with the email you added. Use **Copy invite** to get a ready-to-send message.
+
+## Updating an existing database
+
+When a new version adds database changes, run the matching file in `supabase/migrations/` in **SQL Editor** (or simply re-run the whole `supabase/schema.sql`; it is safe to run again).
+
+| File | Adds |
+|---|---|
+| `002_task_history.sql` | `tasks.started_at`, the `task_events` status history table, and backfills existing tasks |
+
+**Activating people from the panel with "Confirm email" on:** Supabase still sends them a confirmation email, and they must click it before their first sign-in. Supabase's built-in email service only sends a few emails per hour; if you add many people at once, set up custom SMTP under **Authentication → Emails**, or turn **Confirm email** off and use **Activate account now** when you add each person (so no invitation is left waiting for someone else to claim).
 
 ## Deploy to GitHub Pages
 

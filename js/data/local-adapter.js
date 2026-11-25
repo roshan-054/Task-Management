@@ -61,6 +61,10 @@ function seed() {
     invitations: [],
     tasks,
     notifications: [],
+    task_events: tasks.flatMap((t) => [
+      { id: uid(), task_id: t.id, changed_by: t.created_by, from_status: null, to_status: 'not_started', created_at: t.created_at },
+      ...(t.completed_at ? [{ id: uid(), task_id: t.id, changed_by: t.assigned_to, from_status: 'in_progress', to_status: 'completed', created_at: t.completed_at }] : []),
+    ]),
   };
 }
 
@@ -91,7 +95,9 @@ export class LocalAdapter {
     let raw = null;
     try { raw = localStorage.getItem(DB_KEY); } catch {}
     if (!raw) { const s = seed(); this.save(s); return s; }
-    return JSON.parse(raw);
+    const db = JSON.parse(raw);
+    db.task_events ||= [];
+    return db;
   }
   save(db) { try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch {} }
   emit(msg) {
@@ -193,6 +199,19 @@ export class LocalAdapter {
     const row = { ...inv, email: e, invited_by: me.id, created_at: now(), accepted_at: null };
     db.invitations.push(row); this.save(db); return row;
   }
+  async activateMember(email, password, fullName) {
+    const db = this.db; const me = this.me(db);
+    const e = email.trim().toLowerCase();
+    const inv = db.invitations.find((i) => i.email === e && !i.accepted_at);
+    if (!inv || (me.role !== 'admin' && inv.invited_by !== me.id)) throw new Error('No pending invitation for this email.');
+    if (db.profiles.some((p) => p.email === e)) throw new Error('An account with this email already exists.');
+    if (password.length < 6) throw new Error('Password should be at least 6 characters.');
+    db.profiles.push({ id: uid(), email: e, full_name: inv.full_name || fullName || e.split('@')[0], title: inv.title || '',
+      role: inv.role, department_id: inv.department_id, team_id: inv.team_id, active: true, created_at: now(), password });
+    inv.accepted_at = now();
+    this.save(db); this.emit({ kind: 'directory' });
+    return { needsConfirmation: false };
+  }
   async deleteInvitation(email) {
     const db = this.db; const me = this.me(db);
     db.invitations = db.invitations.filter((i) => !(i.email === email && (me.role === 'admin' || (i.invited_by === me.id && !i.accepted_at))));
@@ -215,7 +234,9 @@ export class LocalAdapter {
     if (!input.title?.trim()) throw new Error('Give the task a title.');
     const t = { id: uid(), description: '', status: 'not_started', priority: 'medium', due_date: null, links: [], ...input,
       created_by: me.id, created_at: now(), updated_at: now(), completed_at: input.status === 'completed' ? now() : null };
+    if (['in_progress', 'completed'].includes(t.status)) t.started_at = now();
     db.tasks.push(t);
+    db.task_events.push({ id: uid(), task_id: t.id, changed_by: me.id, from_status: null, to_status: t.status, created_at: now() });
     const notes = [];
     if (t.assigned_to !== me.id) notes.push(this.notify(db, t.assigned_to, t, 'assigned', `${me.full_name} assigned you "${t.title}"`));
     this.save(db);
@@ -239,6 +260,8 @@ export class LocalAdapter {
     Object.assign(t, rest, { updated_at: now() });
     if (t.status === 'completed' && old.status !== 'completed') t.completed_at = now();
     if (t.status !== 'completed') t.completed_at = null;
+    if (!t.started_at && t.status !== old.status && ['in_progress', 'completed'].includes(t.status)) t.started_at = now();
+    if (t.status !== old.status) db.task_events.push({ id: uid(), task_id: t.id, changed_by: me.id, from_status: old.status, to_status: t.status, created_at: now() });
     const notes = [];
     if (t.status !== old.status && me.id !== t.created_by) {
       if (t.status === 'completed') notes.push(this.notify(db, t.created_by, t, 'completed', `${me.full_name} completed "${t.title}"`));
@@ -258,6 +281,13 @@ export class LocalAdapter {
     db.tasks = db.tasks.filter((x) => x.id !== id);
     db.notifications = db.notifications.filter((n) => n.task_id !== id);
     this.save(db); this.emit({ kind: 'task' });
+  }
+
+  async listTaskEvents(taskId) {
+    const db = this.db; const me = this.me(db);
+    const t = db.tasks.find((x) => x.id === taskId);
+    if (!t || !this.canSee(me, t)) return [];
+    return clone(db.task_events.filter((e) => e.task_id === taskId)).sort((a, b) => a.created_at.localeCompare(b.created_at));
   }
 
   // ---------- notifications ----------

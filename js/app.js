@@ -45,6 +45,9 @@ const timeAgo = (iso) => {
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
   return fmtDate(iso);
 };
+const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+const ROLE_LABELS = { admin: 'Admin', manager: 'Manager', member: 'Team member' };
+const roleLabel = (r) => ROLE_LABELS[r] || r;
 const pct = (x) => `${Math.round((x || 0) * 100)}%`;
 
 // Icons: simple line drawings, 18px
@@ -68,6 +71,7 @@ const icon = {
   moon: (s) => I('<path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/>', s),
   sun: (s) => I('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>', s),
   grid: (s) => I('<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>', s),
+  board: (s) => I('<rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="16.5" y="4" width="4" height="7" rx="1.5"/>', s),
   pause: (s) => I('<circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/>', s),
   play: (s) => I('<circle cx="12" cy="12" r="9"/><path d="M10 8.5l5 3.5-5 3.5z"/>', s),
   circle: (s) => I('<circle cx="12" cy="12" r="9"/>', s),
@@ -158,7 +162,7 @@ function renderAuth(mode = 'signin') {
   app().innerHTML = `
   <main class="auth">
     <div class="auth-card">
-      <div class="auth-logo">${I('<path d="M6 12.5l4 4L18 8"/>', 30)}</div>
+      <img class="auth-logo" src="icons/icon.svg" alt="" width="64" height="64">
       <h1>${titles[mode][0]}</h1>
       <p class="lead">${titles[mode][1]}</p>
       <form class="stack" id="auth-form" novalidate>
@@ -209,7 +213,7 @@ function renderAuth(mode = 'signin') {
       }
     } catch (ex) {
       err.textContent = /Database error saving new user/i.test(ex.message)
-        ? 'This email has not been invited. Ask your admin or manager to add you first.' : ex.message;
+        ? 'This email has not been invited. Ask your admin or manager to add you first.' : friendlyAuthError(ex);
     } finally { btn.disabled = false; }
   });
 }
@@ -295,8 +299,8 @@ function navItems() {
   if (isManager()) items.push({ hash: '#/assigned', label: 'Assigned by Me', ic: icon.send, count: () => assignedByMe().filter((t) => t.status !== 'completed').length });
   if (isAdmin()) items.push({ hash: '#/all', label: 'All Tasks', ic: icon.stack });
   items.push({ section: 'Performance' });
-  items.push({ hash: '#/kpi', label: 'My Performance', ic: icon.chart });
-  if (isManager()) items.push({ hash: '#/team-kpi', label: isAdmin() ? 'Company KPIs' : 'Department KPIs', ic: icon.grid });
+  if (isManager()) items.push({ hash: '#/team-kpi', label: 'Team Performance', ic: icon.chart });
+  else items.push({ hash: '#/kpi', label: 'My Performance', ic: icon.chart });
   if (isManager()) { items.push({ section: 'Organisation' }); items.push({ hash: '#/people', label: 'People & Teams', ic: icon.team }); }
   return items;
 }
@@ -309,12 +313,12 @@ function renderShell() {
   app().innerHTML = `
   <div class="shell">
     <aside class="sidebar">
-      <div class="brand"><div class="mark">${I('<path d="M6 12.5l4 4L18 8"/>', 18)}</div>${esc(CONFIG.APP_NAME)}</div>
+      <div class="brand"><img class="mark" src="icons/icon.svg" alt="" width="30" height="30">${esc(CONFIG.APP_NAME)}</div>
       ${items.map((it) => it.section ? `<div class="nav-label">${esc(it.section)}</div>`
         : `<button class="nav-item" data-nav="${it.hash}">${it.ic()}<span>${esc(it.label)}</span>${it.count ? `<span class="count" data-count="${it.hash}"></span>` : ''}</button>`).join('')}
       <div class="spacer"></div>
       ${store.mode === 'demo' ? `<div style="padding:0 10px 8px"><span class="demo-banner">Demo mode</span></div>` : ''}
-      <div class="me-card" id="me-card">${avatar(me)}<div class="who"><b>${esc(me.full_name)}</b><span>${esc(me.role)} · ${esc(teamName(me.team_id))}</span></div></div>
+      <div class="me-card" id="me-card">${avatar(me)}<div class="who"><b>${esc(me.full_name)}</b><span>${esc(roleLabel(me.role))} · ${esc(teamName(me.team_id))}</span></div></div>
     </aside>
     <div class="main">
       <header class="topbar">
@@ -327,7 +331,7 @@ function renderShell() {
       <div id="view"></div>
     </div>
     <nav class="mobile-tabs">
-      ${items.filter((it) => !it.section).slice(0, 5).map((it) => `<button data-nav="${it.hash}">${it.ic(22)}<span>${esc(it.label.replace('Assigned by Me', 'Assigned').replace('My Performance', 'KPI').replace('Department KPIs', 'Team KPI').replace('Company KPIs', 'Team KPI').replace('People & Teams', 'People'))}</span></button>`).join('')}
+      ${items.filter((it) => !it.section).slice(0, 5).map((it) => `<button data-nav="${it.hash}">${it.ic(22)}<span>${esc(it.label.replace('Assigned by Me', 'Assigned').replace('My Performance', 'KPI').replace('Team Performance', 'KPI').replace('People & Teams', 'People'))}</span></button>`).join('')}
     </nav>
   </div>`;
 
@@ -405,7 +409,7 @@ function route() {
   if (/^#\/(tasks|assigned|all)$/.test(h)) {
     if ((h === '#/assigned' && !isManager()) || (h === '#/all' && !isAdmin())) { location.hash = '#/tasks'; return; }
     renderTaskView();
-  } else if (h === '#/kpi') renderKpi(state.me.id);
+  } else if (h === '#/kpi') { if (isManager()) { location.hash = '#/team-kpi'; return; } renderKpi(state.me.id); }
   else if (h.startsWith('#/kpi/')) renderKpi(decodeURIComponent(h.slice(6)));
   else if (h === '#/team-kpi' && isManager()) renderTeamKpi();
   else if (h === '#/people' && isManager()) renderPeople();
@@ -424,6 +428,10 @@ function viewTasks() {
   return myTasks();
 }
 
+function getViewMode() { const def = matchMedia('(max-width: 860px)').matches ? 'cards' : 'board'; try { return localStorage.getItem('taskflow-view') || def; } catch { return def; } }
+function setViewMode(v) { try { localStorage.setItem('taskflow-view', v); } catch {} }
+const canChangeStatus = (t) => t.assigned_to === state.me.id || canEditTask(t);
+
 function renderTaskView() {
   const h = location.hash || '#/tasks';
   const titles = {
@@ -432,26 +440,41 @@ function renderTaskView() {
     '#/all': ['All Tasks', 'Every task in the organisation (admin view).'],
   };
   const f = state.filter;
+  const mode = getViewMode();
   const base = viewTasks();
   const q = f.q.trim().toLowerCase();
   const searched = q ? base.filter((t) => [t.title, t.description, person(t.assigned_to).full_name, person(t.created_by).full_name]
     .some((s) => (s || '').toLowerCase().includes(q))) : base;
-  const counts = { active: searched.filter((t) => t.status !== 'completed').length, all: searched.length };
-  STATUSES.forEach((s) => { counts[s.id] = searched.filter((t) => t.status === s.id).length; });
-  let list = searched.filter((t) => f.status === 'all' || (f.status === 'active' ? t.status !== 'completed' : t.status === f.status));
-  if (f.priority !== 'all') list = list.filter((t) => t.priority === f.priority);
-  list.sort((a, b) => {
+  let pool = f.priority === 'all' ? searched : searched.filter((t) => t.priority === f.priority);
+  const counts = { active: pool.filter((t) => t.status !== 'completed').length, all: pool.length };
+  STATUSES.forEach((s) => { counts[s.id] = pool.filter((t) => t.status === s.id).length; });
+  const sorter = (a, b) => {
     if (f.sort === 'priority') return prioRank[a.priority] - prioRank[b.priority] || (a.due_date || '9').localeCompare(b.due_date || '9');
     if (f.sort === 'recent') return b.created_at.localeCompare(a.created_at);
     return (a.due_date || '9999').localeCompare(b.due_date || '9999') || prioRank[a.priority] - prioRank[b.priority];
-  });
+  };
+  pool = [...pool].sort(sorter);
+  const list = pool.filter((t) => f.status === 'all' || (f.status === 'active' ? t.status !== 'completed' : t.status === f.status));
 
   const segs = [['active', 'Active'], ...STATUSES.map((s) => [s.id, s.label]), ['all', 'All']];
+  const board = `<div class="board">${STATUSES.map((s) => {
+    const col = pool.filter((t) => t.status === s.id);
+    return `<div class="column" data-col="${s.id}">
+      <div class="col-head tone-${s.tone}">${statusIcon[s.id](16)}<span>${s.label}</span><b>${col.length}</b></div>
+      <div class="col-body">${col.map((t, i) => taskCard(t, i)).join('') || `<div class="col-empty">Drop tasks here</div>`}</div>
+    </div>`;
+  }).join('')}</div>`;
+  const cards = list.length ? `<div class="card-grid">${list.map((t, i) => taskCard(t, i)).join('')}</div>` : emptyState(h);
+
   $('#view').innerHTML = `
-  <section class="content">
-    <div class="page-head"><div><h1>${titles[h][0]}</h1><p>${titles[h][1]}</p></div></div>
+  <section class="content wide">
+    <div class="page-head"><div><h1>${titles[h][0]}</h1><p>${titles[h][1]}</p></div>
+      <div class="segmented view-toggle" aria-label="Layout">
+        <button class="${mode === 'board' ? 'active' : ''}" data-mode="board">${icon.board(15)} Board</button>
+        <button class="${mode === 'cards' ? 'active' : ''}" data-mode="cards">${icon.grid(15)} Cards</button>
+      </div></div>
     <div class="toolbar">
-      <div class="segmented" role="tablist">${segs.map(([id, label]) => `<button class="${f.status === id ? 'active' : ''}" data-status="${id}">${label}<span class="n">${counts[id]}</span></button>`).join('')}</div>
+      ${mode === 'cards' ? `<div class="segmented" role="tablist">${segs.map(([id, label]) => `<button class="${f.status === id ? 'active' : ''}" data-status="${id}">${label}<span class="n">${counts[id]}</span></button>`).join('')}</div>` : ''}
       <select class="select" id="f-prio" aria-label="Priority filter">
         <option value="all">All priorities</option>${PRIORITIES.map((p) => `<option value="${p.id}" ${f.priority === p.id ? 'selected' : ''}>${p.label}</option>`).join('')}
       </select>
@@ -460,19 +483,35 @@ function renderTaskView() {
         <option value="priority" ${f.sort === 'priority' ? 'selected' : ''}>Sort by priority</option>
         <option value="recent" ${f.sort === 'recent' ? 'selected' : ''}>Newest first</option>
       </select>
+      ${mode === 'board' ? `<span class="small muted hint">Drag a card to another column to change its status.</span>` : ''}
     </div>
-    <div class="task-list">
-      ${list.length ? list.map((t, i) => taskCard(t, i)).join('') : emptyState(h)}
-    </div>
+    ${mode === 'board' ? (pool.length ? board : emptyState(h)) : cards}
   </section>`;
 
+  $$('[data-mode]').forEach((b) => b.addEventListener('click', () => { setViewMode(b.dataset.mode); renderTaskView(); }));
   $$('[data-status]').forEach((b) => b.addEventListener('click', () => { f.status = b.dataset.status; renderTaskView(); }));
   $('#f-prio').addEventListener('change', (e) => { f.priority = e.target.value; renderTaskView(); });
   $('#f-sort').addEventListener('change', (e) => { f.sort = e.target.value; renderTaskView(); });
-  $$('.task').forEach((el) => el.addEventListener('click', (e) => {
-    if (e.target.closest('select, a, button')) return;
-    openTask(byId(state.tasks, el.dataset.id));
-  }));
+  $$('.tcard').forEach((el) => {
+    el.addEventListener('click', (e) => { if (!e.target.closest('select, a, button')) openTask(byId(state.tasks, el.dataset.id)); });
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === el) openTask(byId(state.tasks, el.dataset.id)); });
+    if (el.draggable) {
+      el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', el.dataset.id); e.dataTransfer.effectAllowed = 'move'; el.classList.add('dragging'); document.body.classList.add('is-dragging'); });
+      el.addEventListener('dragend', () => { el.classList.remove('dragging'); document.body.classList.remove('is-dragging'); });
+    }
+  });
+  $$('.column').forEach((col) => {
+    col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('over'); });
+    col.addEventListener('dragleave', (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove('over'); });
+    col.addEventListener('drop', (e) => {
+      e.preventDefault(); col.classList.remove('over');
+      const id = e.dataTransfer.getData('text/plain');
+      const t = byId(state.tasks, id);
+      if (!t) return;
+      if (!canChangeStatus(t)) return toast('Not allowed', 'Only the assignee or the person who created this task can change its status.', 'orange', icon.lock);
+      changeStatus(id, col.dataset.col);
+    });
+  });
   $$('.status-select').forEach((sel) => sel.addEventListener('change', (e) => changeStatus(sel.dataset.id, e.target.value)));
   $('#empty-new')?.addEventListener('click', () => openTaskEditor());
 }
@@ -491,32 +530,36 @@ function statusSelect(t) {
     ${STATUSES.map((x) => `<option value="${x.id}" ${x.id === t.status ? 'selected' : ''}>${x.label}</option>`).join('')}</select>`;
 }
 
+function personChip(label, p) {
+  return `<div class="who-block"><span class="k">${label}</span><span class="v">${avatar(p, 'sm')}<span>${p.id === state.me.id ? 'You' : esc(p.full_name)}</span></span></div>`;
+}
+
 function taskCard(t, i = 0) {
   const p = prioOf(t.priority);
   const assignee = person(t.assigned_to);
   const creator = person(t.created_by);
   const overdue = t.status !== 'completed' && t.due_date && t.due_date < todayISO();
   const locked = !canEditTask(t);
-  const mine = t.assigned_to === state.me.id;
-  const who = mine
-    ? (t.created_by === state.me.id ? '<span class="m">Personal task</span>' : `<span class="m">${avatar(creator, 'sm')} From ${esc(creator.full_name)}</span>`)
-    : `<span class="m">${avatar(assignee, 'sm')} To ${esc(assignee.full_name)} · ${esc(teamName(assignee.team_id))}</span>`;
+  const canStatus = canChangeStatus(t);
   const links = (t.links || []).map((l) => ({ ...l, href: safeUrl(l.url) })).filter((l) => l.href);
   return `
-  <article class="task ${t.status === 'completed' ? 'done' : ''}" data-id="${esc(t.id)}" style="animation-delay:${Math.min(i, 12) * 25}ms" tabindex="0">
-    <div class="prio-bar" style="background:${p.color}" title="${p.label} priority"></div>
-    <div style="min-width:0">
-      <h3 class="task-title">${esc(t.title)}</h3>
-      ${t.description ? `<p class="task-desc">${esc(t.description)}</p>` : ''}
-      <div class="meta">
-        <span class="pill tone-${p.tone}">${p.label}</span>
-        ${t.due_date ? `<span class="m ${overdue ? 'overdue' : ''}">${icon.cal(14)} ${overdue ? 'Overdue · ' : 'Due '}${esc(fmtDate(t.due_date))}</span>` : ''}
-        ${who}
-        ${locked ? `<span class="lock" title="Assigned by a manager. You can update the status only.">${icon.lock(13)} Status only</span>` : ''}
-      </div>
-      ${links.length ? `<div class="links">${links.map((l) => `<a class="link-chip" href="${esc(l.href)}" target="_blank" rel="noopener noreferrer">${icon.link(14)}<span>${esc(l.label || new URL(l.href).hostname)}</span></a>`).join('')}</div>` : ''}
+  <article class="tcard ${t.status === 'completed' ? 'done' : ''}" data-id="${esc(t.id)}" style="--prio:${p.color};animation-delay:${Math.min(i, 12) * 30}ms" tabindex="0" ${canStatus ? 'draggable="true"' : ''}>
+    <div class="tcard-top">
+      <span class="pill tone-${p.tone}">${p.label}</span>
+      ${t.due_date ? `<span class="due ${overdue ? 'overdue' : ''}">${icon.cal(13)} ${overdue ? 'Overdue · ' : ''}${esc(fmtDate(t.due_date))}</span>` : ''}
+      ${locked ? `<span class="lock" title="Assigned by someone else. You can update the status only.">${icon.lock(13)}</span>` : ''}
     </div>
-    <div class="task-side">${mine || canEditTask(t) ? statusSelect(t) : `<span class="pill dot tone-${statusOf(t.status).tone}">${statusOf(t.status).label}</span>`}</div>
+    <h3 class="tcard-title">${esc(t.title)}</h3>
+    ${t.description ? `<p class="task-desc">${esc(t.description)}</p>` : ''}
+    ${links.length ? `<div class="links">${links.map((l) => `<a class="link-chip" href="${esc(l.href)}" target="_blank" rel="noopener noreferrer">${icon.link(13)}<span>${esc(l.label || new URL(l.href).hostname)}</span></a>`).join('')}</div>` : ''}
+    <div class="tcard-people">
+      ${personChip('Assigned by', creator)}
+      ${personChip('Assigned to', assignee)}
+    </div>
+    <div class="tcard-foot">
+      ${canStatus ? statusSelect(t) : `<span class="pill dot tone-${statusOf(t.status).tone}">${statusOf(t.status).label}</span>`}
+      ${t.completed_at ? `<span class="done-at" title="Completed ${esc(fmtDateTime(t.completed_at))}">${icon.check(14)} ${esc(fmtDateTime(t.completed_at))}</span>` : `<span class="small muted">Added ${esc(timeAgo(t.created_at))}</span>`}
+    </div>
   </article>`;
 }
 
@@ -535,6 +578,28 @@ async function changeStatus(id, status) {
 }
 
 // ---------- task detail ----------
+function timingBlock(t) {
+  const row = (k, v) => `<div class="tl-row"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  const dur = (a, b) => { const h = (new Date(b) - new Date(a)) / 3600e3; return h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`; };
+  return `<div class="timing"><div class="field"><label>Timeline</label></div>
+    ${row('Created', esc(fmtDateTime(t.created_at)))}
+    ${t.started_at ? row('Started', esc(fmtDateTime(t.started_at))) : ''}
+    ${t.completed_at ? row('Completed', `<b style="color:var(--green)">${esc(fmtDateTime(t.completed_at))}</b> · took ${dur(t.created_at, t.completed_at)}${t.due_date ? (t.completed_at.slice(0, 10) <= t.due_date ? ' · <span style="color:var(--green)">on time</span>' : ' · <span style="color:var(--red)">late</span>') : ''}`) : ''}
+    <div class="history" data-history><span class="small muted">Loading status history…</span></div></div>`;
+}
+async function loadHistory(t, ov) {
+  const el = $('[data-history]', ov);
+  if (!el) return;
+  try {
+    const ev = await store.listTaskEvents(t.id);
+    el.innerHTML = ev.length ? `<div class="small muted" style="margin:8px 0 4px">Status history</div>` + ev.map((e) => {
+      const to = statusOf(e.to_status);
+      return `<div class="hist-row"><span class="dot-s" style="background:var(--${to.tone === 'gray' ? 'gray' : to.tone === 'blue' ? 'accent' : to.tone})"></span>
+        <span><b>${esc(to.label)}</b>${e.changed_by ? ` · ${esc(person(e.changed_by).full_name)}` : ''}</span><time>${esc(fmtDateTime(e.created_at))}</time></div>`;
+    }).join('') : '';
+  } catch { el.innerHTML = ''; }
+}
+
 function openTask(t) {
   if (!t) return;
   if (canEditTask(t)) return openTaskEditor(t);
@@ -554,12 +619,13 @@ function openTask(t) {
         <div class="detail"><div class="k">Assigned by</div><div class="v">${avatar(creator, 'sm')} ${esc(creator.full_name)}</div></div>
         <div class="detail"><div class="k">Assigned to</div><div class="v">${avatar(assignee, 'sm')} ${esc(assignee.full_name)}</div></div>
       </div>
+      ${timingBlock(t)}
       ${links.length ? `<div><div class="field"><label>Related links</label></div><div class="links">${links.map((l) => `<a class="link-chip" href="${esc(l.href)}" target="_blank" rel="noopener noreferrer">${icon.link(14)}<span>${esc(l.label || l.href)}</span>${icon.arrow(12)}</a>`).join('')}</div></div>` : ''}
       ${canStatus ? `<div class="field"><label>Work status</label>
         <div class="status-picker">${STATUSES.map((s) => `<button type="button" class="tone-${s.tone} ${s.id === t.status ? 'active' : ''}" data-set="${s.id}" style="background:${s.id === t.status ? '' : 'var(--surface)'}">${statusIcon[s.id](22)}${s.label}</button>`).join('')}</div></div>`
         : `<div class="detail"><div class="k">Status</div><div class="v"><span class="pill dot tone-${statusOf(t.status).tone}">${statusOf(t.status).label}</span></div></div>`}
-      <div class="small muted">Created ${esc(timeAgo(t.created_at))}${t.completed_at ? ` · Completed ${esc(timeAgo(t.completed_at))}` : ''}</div>
     </div>`, (ov) => {
+    loadHistory(t, ov);
     $$('[data-set]', ov).forEach((b) => b.addEventListener('click', async () => {
       await changeStatus(t.id, b.dataset.set);
       closeSheet();
@@ -596,7 +662,7 @@ function openTaskEditor(t = null) {
       <div class="field"><label for="t-desc">Details</label><textarea class="textarea" id="t-desc" placeholder="Add context, steps or acceptance criteria">${esc(data.description)}</textarea></div>
       <div class="field"><label for="t-assignee">Assign to</label>
         <select class="select" id="t-assignee" ${isManager() ? '' : 'disabled'}>${assigneeOptions(data.assigned_to)}</select>
-        ${isManager() ? '' : '<span class="small muted">Members can add tasks for themselves. Managers can assign to anyone.</span>'}</div>
+        ${isManager() ? '' : '<span class="small muted">Team members can add tasks for themselves. Managers can assign to anyone.</span>'}</div>
       <div class="row">
         <div class="field"><label for="t-prio">Priority</label><select class="select" id="t-prio">${PRIORITIES.map((p) => `<option value="${p.id}" ${p.id === data.priority ? 'selected' : ''}>${p.label}</option>`).join('')}</select></div>
         <div class="field"><label for="t-due">Due date</label><input class="input" type="date" id="t-due" value="${esc(data.due_date || '')}"></div>
@@ -605,6 +671,7 @@ function openTaskEditor(t = null) {
       <div class="field"><label>Related links</label>
         <div id="links" style="display:grid;gap:8px">${(data.links || []).map(linkRow).join('')}</div>
         <button type="button" class="btn ghost sm" id="add-link" style="justify-self:start">${icon.plus(14)} Add link</button></div>
+      ${editing ? timingBlock(t) : ''}
       <div class="error" id="t-error"></div>
     </div>
     <div class="sheet-foot">
@@ -612,6 +679,7 @@ function openTaskEditor(t = null) {
       <button type="button" class="btn" data-close>Cancel</button>
       <button type="submit" class="btn primary">${editing ? 'Save changes' : 'Create task'}</button>
     </div></form>`, (ov) => {
+    if (editing) loadHistory(t, ov);
     const linksEl = $('#links', ov);
     const bindRm = () => $$('[data-rm]', linksEl).forEach((b) => { b.onclick = () => b.closest('.link-row').remove(); });
     bindRm();
@@ -673,7 +741,7 @@ function animateRings(root = document) {
   requestAnimationFrame(() => requestAnimationFrame(() => $$('circle.prog', root).forEach((c) => c.setAttribute('stroke-dashoffset', c.dataset.target))));
 }
 
-function kpiBody(k, p) {
+function kpiBody(k, p, hero = null) {
   const segs = [
     ['Completed', k.completed, 'var(--green)'], ['In progress', k.in_progress, 'var(--accent)'],
     ['On hold', k.on_hold, 'var(--orange)'], ['Not started', k.not_started, 'var(--gray)'],
@@ -682,9 +750,9 @@ function kpiBody(k, p) {
   const weekLabel = (i) => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - 7 * (7 - i)); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
   return `
     <div class="card"><div class="profile-hero">
-      ${avatar(p, 'lg')}
-      <div class="info"><h2>${esc(p.full_name)}</h2>
-        <div class="muted">${esc(p.title || p.role)} · ${esc(teamName(p.team_id))} · ${esc(deptName(p.department_id))}</div>
+      ${hero ? `<div class="avatar lg team-av">${icon.team(34)}</div>` : avatar(p, 'lg')}
+      <div class="info"><h2>${esc(hero ? hero.title : p.full_name)}</h2>
+        <div class="muted">${hero ? esc(hero.sub) : `${esc(p.title || roleLabel(p.role))} · ${esc(teamName(p.team_id))} · ${esc(deptName(p.department_id))}`}</div>
         <div style="margin-top:10px"><span class="pill tone-${k.band.tone}">${esc(k.band.label)}</span></div>
       </div>
       ${ring(k.score, k.band.tone)}
@@ -724,8 +792,8 @@ async function renderKpi(userId) {
 }
 
 async function renderTeamKpi() {
-  const title = isAdmin() ? 'Company KPIs' : 'Department KPIs';
-  $('#view').innerHTML = `<section class="content"><div class="page-head"><div><h1>${title}</h1><p>${isAdmin() ? 'Everyone, across all departments.' : `Everyone in ${esc(deptName(state.me.department_id))}.`}</p></div></div><div class="boot" style="min-height:200px"><div class="spinner"></div></div></section>`;
+  const title = 'Team Performance';
+  $('#view').innerHTML = `<section class="content"><div class="page-head"><div><h1>${title}</h1><p>${isAdmin() ? 'Combined performance of everyone, across all departments.' : `Combined performance of everyone in ${esc(deptName(state.me.department_id))}.`}</p></div></div><div class="boot" style="min-height:200px"><div class="spinner"></div></div></section>`;
   try {
     const rows = (await store.kpiStats('department')).map(computeKpi).map((k) => ({ ...k, p: person(k.user_id) }));
     const s = state.kpiSort;
@@ -734,22 +802,27 @@ async function renderTeamKpi() {
     const scored = rows.filter((r) => r.score !== null);
     const avg = scored.length ? Math.round(scored.reduce((a, r) => a + r.score, 0) / scored.length) : null;
     const sum = (k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
-    const totalDone = sum('completed'), total = sum('total'), onTime = sum('completed_on_time');
+    // Combined KPI for the whole team: add up everyone's counts.
+    const agg = { total: 0, completed: 0, in_progress: 0, on_hold: 0, not_started: 0, overdue_open: 0, completed_on_time: 0, completed_late: 0, high_priority_completed: 0, weekly: Array(8).fill(0) };
+    let hrs = 0;
+    rows.forEach((r) => {
+      Object.keys(agg).forEach((k) => { if (k !== 'weekly') agg[k] += r[k] || 0; });
+      r.weekly.forEach((v, i) => { agg.weekly[i] += v; });
+      if (r.avg_completion_hours !== null && r.avg_completion_hours !== undefined) hrs += Number(r.avg_completion_hours) * r.completed;
+    });
+    agg.avg_completion_hours = agg.completed ? hrs / agg.completed : null;
+    const team = computeKpi(agg);
+    const heroInfo = { title: isAdmin() ? 'Whole company' : deptName(state.me.department_id), sub: `Combined performance of ${rows.length} ${rows.length === 1 ? 'person' : 'people'} · average individual score ${avg ?? '—'}` };
     const th = (key, label) => `<th data-sort="${key}">${label}${s.key === key ? (s.dir < 0 ? ' ↓' : ' ↑') : ''}</th>`;
     $('#view .content').innerHTML = `
-      <div class="page-head"><div><h1>${title}</h1><p>${isAdmin() ? 'Everyone, across all departments.' : `Everyone in ${esc(deptName(state.me.department_id))}.`}</p></div></div>
-      <div class="grid cols-4">
-        <div class="card stat"><div class="label">Average score</div><div class="value">${avg ?? '—'}</div><div class="sub">${rows.length} people</div></div>
-        <div class="card stat"><div class="label">Tasks completed</div><div class="value">${totalDone}</div><div class="sub">of ${total} assigned</div></div>
-        <div class="card stat"><div class="label">On-time delivery</div><div class="value">${totalDone ? pct(onTime / totalDone) : '—'}</div><div class="sub">${onTime} on time</div></div>
-        <div class="card stat"><div class="label">Overdue now</div><div class="value" style="${sum('overdue_open') ? 'color:var(--red)' : ''}">${sum('overdue_open')}</div><div class="sub">${sum('on_hold')} on hold</div></div>
-      </div>
+      <div class="page-head"><div><h1>${title}</h1><p>${isAdmin() ? 'Combined performance of everyone, across all departments.' : `Combined performance of everyone in ${esc(deptName(state.me.department_id))}.`}</p></div></div>
+      ${kpiBody(team, null, heroInfo)}
       <div class="card" style="margin-top:16px"><h2>Team members</h2>
         ${rows.length ? `<div class="table-wrap"><table class="table"><thead><tr>
           ${th('name', 'Member')}${th('team', 'Team')}${th('score', 'Score')}${th('completionRate', 'Completion')}${th('onTimeRate', 'On time')}${th('open', 'Open')}${th('overdue_open', 'Overdue')}
         </tr></thead><tbody>
         ${rows.map((r) => `<tr data-user="${esc(r.user_id)}">
-          <td><div class="person">${avatar(r.p)}<div><b>${esc(r.p.full_name)}</b><span>${esc(r.p.title || r.p.role)}</span></div></div></td>
+          <td><div class="person">${avatar(r.p)}<div><b>${esc(r.p.full_name)}</b><span>${esc(r.p.title || roleLabel(r.p.role))}</span></div></div></td>
           <td>${esc(teamName(r.p.team_id))}${isAdmin() ? `<div class="small muted">${esc(deptName(r.p.department_id))}</div>` : ''}</td>
           <td>${r.score === null ? '<span class="muted">—</span>' : `<span class="pill tone-${r.band.tone}">${r.score}</span>`}</td>
           <td><div style="display:flex;align-items:center;gap:8px"><div class="meter"><div style="width:${r.completionRate * 100}%"></div></div>${pct(r.completionRate)}</div></td>
@@ -761,6 +834,7 @@ async function renderTeamKpi() {
     $$('[data-sort]').forEach((h) => h.addEventListener('click', () => {
       const k = h.dataset.sort; s.dir = s.key === k ? -s.dir : (k === 'name' || k === 'team' ? 1 : -1); s.key = k; renderTeamKpi();
     }));
+    animateRings();
     $$('tr[data-user]').forEach((tr) => tr.addEventListener('click', () => { location.hash = '#/kpi/' + encodeURIComponent(tr.dataset.user); }));
   } catch (e) { fail(e); }
 }
@@ -809,16 +883,21 @@ async function renderPeople() {
     </div>
     ${pending.length ? `<div class="card" style="margin-top:16px"><h2>Waiting to activate</h2>
       ${pending.map((i) => `<div class="list-row"><div class="avatar" style="background:var(--gray)">${esc(initials(i.full_name || i.email))}</div>
-        <div class="grow"><b>${esc(i.full_name || i.email)}</b><span>${esc(i.email)} · ${esc(i.role)} · ${esc(teamName(i.team_id))}</span></div>
+        <div class="grow"><b>${esc(i.full_name || i.email)}</b><span>${esc(i.email)} · ${esc(roleLabel(i.role))} · ${esc(teamName(i.team_id))}</span></div>
+        <button class="btn sm primary" data-activate="${esc(i.email)}">Activate now</button>
         <button class="btn sm" data-copy="${esc(i.email)}">Copy invite</button>
         <button class="icon-btn" data-del-inv="${esc(i.email)}" aria-label="Remove invitation">${icon.trash(16)}</button></div>`).join('')}
-      <p class="small muted">Share the app link with them. They choose “Activate your account” and sign up with this email.</p></div>` : ''}
+      <p class="small muted">Click <b>Activate now</b> to create their account with a password you choose, or share the app link so they activate it themselves.</p></div>` : ''}
   </section>`;
 
   $('#invite-btn').addEventListener('click', openInvite);
   $$('[data-person]').forEach((r) => r.addEventListener('click', () => {
     const p = person(r.dataset.person);
     if (isAdmin()) openPersonEditor(p); else location.hash = '#/kpi/' + encodeURIComponent(p.id);
+  }));
+  $$('[data-activate]').forEach((b) => b.addEventListener('click', () => {
+    const inv = state.invitations.find((i) => i.email === b.dataset.activate);
+    if (inv) openActivate(inv);
   }));
   $$('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
     const text = `You've been added to ${CONFIG.APP_NAME}. Open ${location.origin + location.pathname}, choose "Activate your account" and sign up with ${b.dataset.copy}.`;
@@ -843,11 +922,56 @@ async function renderPeople() {
   $$('[data-del-team]').forEach((b) => confirmDel(b, () => store.deleteTeam(b.dataset.delTeam)));
 }
 
+function genPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const a = new Uint32Array(10); crypto.getRandomValues(a);
+  return [...a].map((n) => chars[n % chars.length]).join('') + '!';
+}
+
+async function activateAccount(email, password, fullName) {
+  const r = await store.activateMember(email, password, fullName);
+  try { await navigator.clipboard.writeText(`${CONFIG.APP_NAME}: ${location.origin + location.pathname}\nEmail: ${email}\nTemporary password: ${password}\nPlease change your password after signing in (click your name, bottom left).`); } catch {}
+  toast('Account activated', r.needsConfirmation
+    ? 'Login details copied. They must click the confirmation email first.'
+    : 'Login details copied to your clipboard. Share them privately.', 'green', icon.check);
+  await loadAll();
+}
+
+function openActivate(inv) {
+  const pw = genPassword();
+  openSheet(`${sheetHead('Activate account')}
+    <form id="act-form" novalidate><div class="sheet-body">
+      <div class="notice">${icon.info(18)}<div>This creates the login for <b>${esc(inv.full_name || inv.email)}</b> (${esc(inv.email)}) right now. Share the password with them privately; they can change it after signing in.</div></div>
+      <div class="field"><label>Temporary password</label>
+        <div style="display:flex;gap:8px"><input class="input" id="act-pw" value="${esc(pw)}" autocomplete="off"><button type="button" class="btn" id="act-gen">New</button></div></div>
+      <div class="error" id="act-error"></div>
+    </div><div class="sheet-foot"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit">Activate account</button></div></form>`, (ov) => {
+    $('#act-gen', ov).addEventListener('click', () => { $('#act-pw', ov).value = genPassword(); });
+    $('#act-form', ov).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('button[type=submit]', ov); btn.disabled = true;
+      try {
+        const pass = $('#act-pw', ov).value;
+        if (pass.length < 8) throw new Error('Use at least 8 characters.');
+        await activateAccount(inv.email, pass, inv.full_name);
+        closeSheet(); renderPeople();
+      } catch (ex) { $('#act-error', ov).textContent = friendlyAuthError(ex); btn.disabled = false; }
+    });
+  });
+}
+
+function friendlyAuthError(ex) {
+  const m = ex?.message || String(ex);
+  if (/Database error saving new user/i.test(m)) return 'This email has not been invited, or the invitation was already used.';
+  if (/rate limit/i.test(m)) return 'Supabase email limit reached. Try again in an hour, or turn off "Confirm email" in Supabase.';
+  return m;
+}
+
 function personRow(p, roleTone) {
   return `<div class="list-row click" data-person="${esc(p.id)}" style="${p.active ? '' : 'opacity:.5'}">${avatar(p)}
     <div class="grow"><b>${esc(p.full_name)}${p.id === state.me.id ? ' (you)' : ''}</b><span>${esc(p.title || p.email)}</span></div>
     ${p.active ? '' : '<span class="pill tone-gray">Inactive</span>'}
-    <span class="pill tone-${roleTone[p.role]}" style="text-transform:capitalize">${esc(p.role)}</span></div>`;
+    <span class="pill tone-${roleTone[p.role]}">${esc(roleLabel(p.role))}</span></div>`;
 }
 
 function teamOptions(deptId, selected) {
@@ -871,26 +995,36 @@ function openInvite() {
       <div class="field"><label>Job title</label><input class="input" id="i-title" placeholder="e.g. Support Specialist"></div>
       <div class="row">
         <div class="field"><label>Role</label><select class="select" id="i-role" ${admin ? '' : 'disabled'}>
-          <option value="member">Member</option>${admin ? '<option value="manager">Manager</option><option value="admin">Admin</option>' : ''}</select></div>
+          <option value="member">Team member</option>${admin ? '<option value="manager">Manager</option><option value="admin">Admin</option>' : ''}</select></div>
         <div class="field"><label>Department</label><select class="select" id="i-dept" ${admin ? '' : 'disabled'}>${deptOptions(dept)}</select></div>
       </div>
       <div class="field"><label>Team</label><select class="select" id="i-team">${teamOptions(dept)}</select></div>
+      <label class="check-row"><input type="checkbox" id="i-now" checked> <span><b>Activate account now</b><br><span class="small muted">Create their login immediately with a temporary password (copied for you to share).</span></span></label>
+      <div class="field" id="i-pw-wrap"><label>Temporary password</label><input class="input" id="i-pw" autocomplete="off"></div>
       <div class="error" id="i-error"></div>
     </div><div class="sheet-foot"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit">Add person</button></div></form>`, (ov) => {
     $('#i-dept', ov).addEventListener('change', (e) => { $('#i-team', ov).innerHTML = teamOptions(e.target.value); });
+    $('#i-pw', ov).value = genPassword();
+    $('#i-now', ov).addEventListener('change', (e) => { $('#i-pw-wrap', ov).classList.toggle('hidden', !e.target.checked); });
     $('#inv-form', ov).addEventListener('submit', async (e) => {
       e.preventDefault();
       const email = $('#i-email', ov).value.trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('#i-error', ov).textContent = 'Enter a valid email.'; return; }
+      if ($('#i-now', ov).checked && $('#i-pw', ov).value.length < 8) { $('#i-error', ov).textContent = 'Use a temporary password of at least 8 characters.'; return; }
       try {
         await store.createInvitation({
           email, full_name: $('#i-name', ov).value.trim(), title: $('#i-title', ov).value.trim(),
           role: $('#i-role', ov).value, department_id: $('#i-dept', ov).value || null, team_id: $('#i-team', ov).value || null,
         });
+        if ($('#i-now', ov).checked) {
+          const pass = $('#i-pw', ov).value;
+          if (pass.length < 8) throw new Error('Use a temporary password of at least 8 characters.');
+          try { await activateAccount(email, pass, $('#i-name', ov).value.trim()); }
+          catch (ex2) { closeSheet(); renderPeople(); return toast('Added, but not activated yet', friendlyAuthError(ex2), 'orange'); }
+        } else toast('Person added', `${email} can now activate their account.`, 'green', icon.check);
         closeSheet();
-        toast('Person added', `${email} can now activate their account.`, 'green', icon.check);
         renderPeople();
-      } catch (ex) { $('#i-error', ov).textContent = ex.message; }
+      } catch (ex) { $('#i-error', ov).textContent = friendlyAuthError(ex); }
     });
   });
 }
@@ -903,7 +1037,7 @@ function openPersonEditor(p) {
         <div class="field"><label>Job title</label><input class="input" id="p-title" value="${esc(p.title)}"></div>
       </div>
       <div class="row">
-        <div class="field"><label>Role</label><select class="select" id="p-role" ${p.id === state.me.id ? 'disabled' : ''}>${['member', 'manager', 'admin'].map((r) => `<option value="${r}" ${r === p.role ? 'selected' : ''} style="text-transform:capitalize">${r[0].toUpperCase() + r.slice(1)}</option>`).join('')}</select></div>
+        <div class="field"><label>Role</label><select class="select" id="p-role" ${p.id === state.me.id ? 'disabled' : ''}>${['member', 'manager', 'admin'].map((r) => `<option value="${r}" ${r === p.role ? 'selected' : ''} style="text-transform:capitalize">${roleLabel(r)}</option>`).join('')}</select></div>
         <div class="field"><label>Department</label><select class="select" id="p-dept">${deptOptions(p.department_id)}</select></div>
       </div>
       <div class="field"><label>Team</label><select class="select" id="p-team">${teamOptions(p.department_id, p.team_id)}</select></div>
@@ -932,7 +1066,7 @@ function openProfileSheet() {
   openSheet(`${sheetHead('Your profile')}
     <form id="me-form"><div class="sheet-body">
       <div style="display:flex;gap:14px;align-items:center">${avatar(me, 'lg')}<div><b style="font-size:18px">${esc(me.full_name)}</b><div class="muted small">${esc(me.email)}</div>
-        <div class="small muted" style="text-transform:capitalize">${esc(me.role)} · ${esc(teamName(me.team_id))} · ${esc(deptName(me.department_id))}</div></div></div>
+        <div class="small muted">${esc(roleLabel(me.role))} · ${esc(teamName(me.team_id))} · ${esc(deptName(me.department_id))}</div></div></div>
       <div class="row">
         <div class="field"><label>Full name</label><input class="input" id="me-name" value="${esc(me.full_name)}"></div>
         <div class="field"><label>Job title</label><input class="input" id="me-title" value="${esc(me.title)}"></div>

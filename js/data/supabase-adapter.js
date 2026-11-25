@@ -10,6 +10,7 @@ function unwrap({ data, error }) {
 export class SupabaseAdapter {
   constructor(url, key) {
     this.mode = 'supabase';
+    this.url = url; this.key = key;
     this.sb = createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true } });
   }
 
@@ -78,6 +79,20 @@ export class SupabaseAdapter {
     return unwrap(await this.sb.from('invitations')
       .insert({ ...inv, email: inv.email.trim().toLowerCase(), invited_by: uid }).select().single());
   }
+  // Admin/manager creates the account for an invited person with a
+  // temporary password. Uses a separate, non-persistent client so the
+  // admin stays signed in. The database still checks the invitation.
+  async activateMember(email, password, fullName) {
+    const tmp = createClient(this.url, this.key, { auth: { persistSession: false, autoRefreshToken: false, storageKey: 'taskflow-activate' } });
+    const data = unwrap(await tmp.auth.signUp({
+      email: email.trim().toLowerCase(), password,
+      options: { data: { full_name: fullName || '' }, emailRedirectTo: location.origin + location.pathname },
+    }));
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0)
+      throw new Error('An account with this email already exists.');
+    if (data.session) await tmp.auth.signOut();
+    return { needsConfirmation: !data.session };
+  }
   async deleteInvitation(email) {
     unwrap(await this.sb.from('invitations').delete().eq('email', email));
   }
@@ -94,6 +109,10 @@ export class SupabaseAdapter {
   }
   async deleteTask(id) {
     unwrap(await this.sb.from('tasks').delete().eq('id', id));
+  }
+
+  async listTaskEvents(taskId) {
+    return unwrap(await this.sb.from('task_events').select('*').eq('task_id', taskId).order('created_at'));
   }
 
   // ---------- notifications ----------
