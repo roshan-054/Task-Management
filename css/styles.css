@@ -533,3 +533,28 @@ body.is-dragging .col-empty { border-color: var(--accent); color: var(--accent);
 .pw-box { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); }
 .pw-result { grid-column: 1 / -1; display: grid; gap: 6px; }
 .pw-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; padding: 6px 10px; border-radius: 8px; background: var(--surface-2); user-select: all; }
+
+/* =====================================================================
+   v4: due date indicator
+   ===================================================================== */
+.due-chip { --c: var(--green); --bg: var(--green-soft); position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 4px; border-radius: 980px; background: var(--bg); color: var(--c); font-size: 12px; font-weight: 600; white-space: nowrap; cursor: help; transition: transform 0.2s var(--ease); outline: none; }
+.due-chip:hover, .due-chip:focus-visible { transform: scale(1.05); }
+.due-chip svg { display: block; }
+.due-track { fill: none; stroke: currentColor; stroke-opacity: 0.22; stroke-width: 2.6; }
+.due-prog { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; transition: stroke-dashoffset 0.9s var(--ease); }
+.due-ok { --c: var(--green); --bg: var(--green-soft); }
+.due-soon { --c: var(--orange); --bg: var(--orange-soft); }
+.due-today { --c: #ff6a00; --bg: var(--orange-soft); animation: duePulse 1.8s ease-in-out infinite; }
+.due-overdue { --c: var(--red); --bg: var(--red-soft); animation: duePulse 1.4s ease-in-out infinite; }
+.due-done { --c: var(--green); --bg: var(--green-soft); }
+.due-late-done { --c: var(--gray); --bg: var(--gray-soft); }
+@keyframes duePulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 45%, transparent); } 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--c) 0%, transparent); } }
+.due-chip::after {
+  content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 8px); z-index: 20; width: max-content; max-width: 260px; white-space: normal;
+  padding: 8px 10px; border-radius: 10px; background: var(--text); color: var(--bg, #fff); color: var(--surface); font-size: 12px; font-weight: 500; line-height: 1.35;
+  box-shadow: var(--shadow-lg); opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity 0.18s, transform 0.18s var(--ease);
+}
+.due-chip:hover::after, .due-chip:focus-visible::after { opacity: 1; transform: none; }
+.tcard { overflow: visible; }
+.tcard::before { border-radius: 16px 0 0 16px; }
+.tcard:hover, .tcard:focus-within { z-index: 6; } .column:hover { position: relative; z-index: 4; }

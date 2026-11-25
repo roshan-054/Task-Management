@@ -74,6 +74,7 @@ When a new version adds database changes, run the matching file in `supabase/mig
 | `002_task_history.sql` | `tasks.started_at`, the `task_events` status history table, and backfills existing tasks |
 | `003_task_remarks.sql` | `task_remarks` (remarks, blockers, tagged people), notifications for them, and read access for tagged people |
 | `004_people_admin.sql` | `profiles.manager_id` ("Reports to"), managers see KPIs of their direct reports, admin **Reset password** |
+| `005_status_notifications.sql` | The person who assigned a task is notified on every status change (started, resumed, on hold, completed, moved back) |
 
 **Activating people from the panel with "Confirm email" on:** Supabase still sends them a confirmation email, and they must click it before their first sign-in. Supabase's built-in email service only sends a few emails per hour; if you add many people at once, set up custom SMTP under **Authentication → Emails**, or turn **Confirm email** off and use **Activate account now** when you add each person (so no invitation is left waiting for someone else to claim).
 

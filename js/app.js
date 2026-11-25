@@ -84,6 +84,7 @@ const icon = {
 };
 const NOTE_STYLE = {
   completed: ['green', 'Task completed', 'check'], on_hold: ['orange', 'Task on hold', 'pause'], assigned: ['blue', 'New task for you', 'plus'],
+  in_progress: ['blue', 'Task in progress', 'play'], not_started: ['gray', 'Task moved back', 'circle'],
   tagged: ['purple', 'You were tagged', 'at'], blocked: ['red', 'Task blocked', 'alert'], remark: ['blue', 'New remark', 'chat'], resolved: ['green', 'Blocker resolved', 'check'],
 };
 const noteStyle = (type) => { const [tone, title, ic] = NOTE_STYLE[type] || NOTE_STYLE.assigned; return { tone, title, ic: icon[ic] }; };
@@ -553,6 +554,43 @@ function blockerBanner(t) {
   return `<div class="blocker-banner">${icon.alert(14)}<span><b>Blocked</b> · ${esc(REASONS[last.reason] || 'Other')}${names.length ? ` · waiting on ${esc(names.join(', '))}` : ''}</span></div>`;
 }
 
+// Due date indicator: a mini ring shows how much of the time between
+// creation and the due date has passed; colour and label show the state.
+function dueInfo(t) {
+  if (!t.due_date) return null;
+  const DAY = 86400e3;
+  const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const due = new Date(t.due_date + 'T23:59:59');
+  const dueDay = startOfDay(t.due_date + 'T00:00:00');
+  if (t.status === 'completed' && t.completed_at) {
+    const diff = Math.round((dueDay - startOfDay(t.completed_at)) / DAY);
+    return { state: diff >= 0 ? 'done' : 'late-done', pct: 1,
+      label: diff > 0 ? `${diff}d early` : diff === 0 ? 'On the day' : `${-diff}d late`,
+      tip: `Due ${fmtDate(t.due_date)} · completed ${fmtDateTime(t.completed_at)}` };
+  }
+  const days = Math.round((dueDay - startOfDay(new Date())) / DAY);
+  const created = new Date(t.created_at).getTime();
+  const pct = Math.min(1, Math.max(0.04, (Date.now() - created) / Math.max(DAY / 4, due - created)));
+  let state, label;
+  if (days < 0) { state = 'overdue'; label = `${-days}d overdue`; }
+  else if (days === 0) { state = 'today'; label = 'Due today'; }
+  else if (days === 1) { state = 'soon'; label = 'Due tomorrow'; }
+  else if (days <= 3) { state = 'soon'; label = `${days} days left`; }
+  else { state = 'ok'; label = `${days} days left`; }
+  const hoursLeft = Math.max(0, Math.round((due - Date.now()) / 3600e3));
+  return { state, pct: days < 0 ? 1 : pct, label,
+    tip: `Due ${new Date(t.due_date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })} · ${days < 0 ? `${-days} day${days === -1 ? '' : 's'} late` : `${hoursLeft} h left`} · ${Math.round(pct * 100)}% of the time used` };
+}
+function dueChip(t) {
+  const d = dueInfo(t);
+  if (!d) return '';
+  const r = 7, c = 2 * Math.PI * r;
+  return `<span class="due-chip due-${d.state}" data-tip="${esc(d.tip)}" tabindex="0" aria-label="${esc(d.label + '. ' + d.tip)}">
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="${r}" class="due-track"/>
+      <circle cx="9" cy="9" r="${r}" class="due-prog" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - d.pct)}" transform="rotate(-90 9 9)"/></svg>
+    <span>${esc(d.label)}</span></span>`;
+}
+
 function personChip(label, p) {
   return `<div class="who-block"><span class="k">${label}</span><span class="v">${avatar(p, 'sm')}<span>${p.id === state.me.id ? 'You' : esc(p.full_name)}</span></span></div>`;
 }
@@ -569,7 +607,7 @@ function taskCard(t, i = 0) {
   <article class="tcard ${t.status === 'completed' ? 'done' : ''}" data-id="${esc(t.id)}" style="--prio:${p.color};animation-delay:${Math.min(i, 12) * 30}ms" tabindex="0" ${canStatus ? 'draggable="true"' : ''}>
     <div class="tcard-top">
       <span class="pill tone-${p.tone}">${p.label}</span>
-      ${t.due_date ? `<span class="due ${overdue ? 'overdue' : ''}">${icon.cal(13)} ${overdue ? 'Overdue · ' : ''}${esc(fmtDate(t.due_date))}</span>` : ''}
+      ${dueChip(t)}
       ${locked ? `<span class="lock" title="Assigned by someone else. You can update the status only.">${icon.lock(13)}</span>` : ''}
     </div>
     <h3 class="tcard-title">${esc(t.title)}</h3>
@@ -759,16 +797,24 @@ function openTask(t) {
 
 function assigneeOptions(selected) {
   if (!isManager()) return `<option value="${esc(state.me.id)}">${esc(state.me.full_name)} (me)</option>`;
-  const active = state.profiles.filter((p) => p.active);
+  const me = state.me;
+  const active = state.profiles.filter((p) => p.active && p.id !== me.id);
+  const opt = (p) => `<option value="${esc(p.id)}" ${p.id === selected ? 'selected' : ''}>${esc(p.full_name)}${p.title ? ' — ' + esc(p.title) : ''}</option>`;
+  const mine = active.filter((p) => p.manager_id === me.id);
+  const dept = active.filter((p) => !mine.includes(p) && me.department_id && p.department_id === me.department_id);
+  const rest = active.filter((p) => !mine.includes(p) && !dept.includes(p));
   const groups = new Map();
-  active.forEach((p) => {
+  rest.forEach((p) => {
     const key = p.department_id ? (p.team_id ? `${deptName(p.department_id)} · ${teamName(p.team_id)}` : deptName(p.department_id)) : 'Other';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(p);
   });
-  const opt = (p) => `<option value="${esc(p.id)}" ${p.id === selected ? 'selected' : ''}>${esc(p.full_name)}${p.id === state.me.id ? ' (me)' : ''}${p.title ? ' — ' + esc(p.title) : ''}</option>`;
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, ps]) => `<optgroup label="${esc(k)}">${ps.map(opt).join('')}</optgroup>`).join('');
+  const byName = (x, y) => x.full_name.localeCompare(y.full_name);
+  return `<option value="" ${selected ? '' : 'selected'} disabled>Choose a person…</option>`
+    + (mine.length ? `<optgroup label="Reports to you">${mine.sort(byName).map(opt).join('')}</optgroup>` : '')
+    + (dept.length ? `<optgroup label="${esc(deptName(me.department_id))}">${dept.sort(byName).map(opt).join('')}</optgroup>` : '')
+    + [...groups.entries()].sort(([x], [y]) => x.localeCompare(y)).map(([k, ps]) => `<optgroup label="${esc(k)}">${ps.sort(byName).map(opt).join('')}</optgroup>`).join('')
+    + `<optgroup label="Me"><option value="${esc(me.id)}" ${selected === me.id ? 'selected' : ''}>${esc(me.full_name)} (me, personal task)</option></optgroup>`;
 }
 
 function linkRow(l = { label: '', url: '' }) {
@@ -779,7 +825,7 @@ function linkRow(l = { label: '', url: '' }) {
 
 function openTaskEditor(t = null) {
   const editing = !!t;
-  const data = t || { title: '', description: '', priority: 'medium', status: 'not_started', due_date: '', links: [], assigned_to: state.me.id };
+  const data = t || { title: '', description: '', priority: 'medium', status: 'not_started', due_date: '', links: [], assigned_to: isManager() ? '' : state.me.id };
   openSheet(`${sheetHead(editing ? 'Edit task' : 'New task')}
     <form id="task-form" novalidate><div class="sheet-body">
       <div class="field"><label for="t-title">Title</label><input class="input" id="t-title" maxlength="200" placeholder="What needs to be done?" value="${esc(data.title)}" required></div>
@@ -821,13 +867,14 @@ function openTaskEditor(t = null) {
       const payload = {
         title: $('#t-title', ov).value.trim(),
         description: $('#t-desc', ov).value.trim(),
-        assigned_to: $('#t-assignee', ov).value || state.me.id,
+        assigned_to: isManager() ? $('#t-assignee', ov).value : state.me.id,
         priority: $('#t-prio', ov).value,
         due_date: $('#t-due', ov).value || null,
         status: $('#t-status', ov).value,
         links,
       };
       if (!payload.title) { err.textContent = 'Give the task a title.'; return; }
+      if (!payload.assigned_to) { err.textContent = 'Choose who this task is for.'; $('#t-assignee', ov).focus(); return; }
       if (bad) { err.textContent = `"${bad.url}" is not a valid link.`; return; }
       const btn = $('button[type=submit]', ov); btn.disabled = true;
       try {

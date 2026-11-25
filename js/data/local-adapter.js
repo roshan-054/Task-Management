@@ -283,8 +283,14 @@ export class LocalAdapter {
     if (t.status !== old.status) db.task_events.push({ id: uid(), task_id: t.id, changed_by: me.id, from_status: old.status, to_status: t.status, created_at: now() });
     const notes = [];
     if (t.status !== old.status && me.id !== t.created_by) {
-      if (t.status === 'completed') notes.push(this.notify(db, t.created_by, t, 'completed', `${me.full_name} completed "${t.title}"`));
-      if (t.status === 'on_hold') notes.push(this.notify(db, t.created_by, t, 'on_hold', `${me.full_name} put "${t.title}" on hold`));
+      const again = old.status === 'on_hold' ? ' again (resumed from on hold)' : old.status === 'completed' ? ' again (reopened)' : '';
+      const msg = { completed: `completed "${t.title}"`, on_hold: `put "${t.title}" on hold`,
+        in_progress: `started working on "${t.title}"${again}`, not_started: `moved "${t.title}" back to not started` }[t.status];
+      notes.push(this.notify(db, t.created_by, t, t.status, `${me.full_name} ${msg}`));
+    }
+    if (t.status !== old.status && me.id === t.created_by && t.assigned_to !== t.created_by) {
+      const lbl = { completed: 'Completed', on_hold: 'On hold', in_progress: 'In progress', not_started: 'Not started' }[t.status];
+      notes.push(this.notify(db, t.assigned_to, t, t.status, `${me.full_name} changed "${t.title}" to ${lbl}`));
     }
     if (t.assigned_to !== old.assigned_to && t.assigned_to !== t.created_by)
       notes.push(this.notify(db, t.assigned_to, t, 'assigned', `${me.full_name} assigned you "${t.title}"`));
