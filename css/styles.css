@@ -595,3 +595,11 @@ body.is-dragging .col-empty { border-color: var(--accent); color: var(--accent);
 .plat-row .icon-btn.armed { color: #fff; background: var(--red); }
 .plat-add { display: flex; gap: 8px; margin-top: 12px; }
 .plat-add .input { flex: 1; }
+
+/* v7: logout next to the profile chip */
+.me-row { display: flex; align-items: center; gap: 4px; }
+.me-row .me-card { flex: 1; min-width: 0; }
+.logout-btn { flex: none; color: var(--text-2); }
+.logout-btn:hover { color: var(--red); background: var(--red-soft); }
+.only-sm { display: none; }
+@media (max-width: 860px) { .only-sm { display: inline-flex; } }

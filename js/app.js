@@ -343,12 +343,16 @@ function renderShell() {
         : `<button class="nav-item" data-nav="${it.hash}">${it.ic()}<span>${esc(it.label)}</span>${it.count ? `<span class="count" data-count="${it.hash}"></span>` : ''}</button>`).join('')}
       <div class="spacer"></div>
       ${store.mode === 'demo' ? `<div style="padding:0 10px 8px"><span class="demo-banner">Demo mode</span></div>` : ''}
-      <div class="me-card" id="me-card">${avatar(me)}<div class="who"><b>${esc(me.full_name)}</b><span>${esc(roleLabel(me.role))} · ${esc(teamName(me.team_id))}</span></div></div>
+      <div class="me-row">
+        <div class="me-card" id="me-card" title="Your profile">${avatar(me)}<div class="who"><b>${esc(me.full_name)}</b><span>${esc(roleLabel(me.role))} · ${esc(teamName(me.team_id))}</span></div></div>
+        <button class="icon-btn logout-btn" id="logout-btn" aria-label="Log out" title="Log out">${icon.out(18)}</button>
+      </div>
     </aside>
     <div class="main">
       <header class="topbar">
         <div class="search">${icon.search(16)}<input id="search" placeholder="Search tasks" value="${esc(state.filter.q)}" aria-label="Search tasks"></div>
         <div class="grow"></div>
+        <button class="icon-btn logout-btn only-sm" id="logout-top" aria-label="Log out" title="Log out">${icon.out(18)}</button>
         <button class="icon-btn" id="theme-btn" aria-label="Toggle theme">${isDark() ? icon.sun() : icon.moon()}</button>
         <button class="icon-btn" id="sound-btn" aria-pressed="${!isMuted()}" aria-label="${isMuted() ? 'Turn notification sound on' : 'Mute notification sound'}" title="${isMuted() ? 'Sound off' : 'Sound on'}">${isMuted() ? icon.muted() : icon.sound()}</button>
         <button class="icon-btn" id="bell" aria-label="Notifications">${icon.bell()}<span class="badge hidden" id="bell-badge"></span></button>
@@ -373,6 +377,7 @@ function renderShell() {
     toast(muted ? 'Sounds muted' : 'Sounds on', muted ? 'Notifications will arrive silently.' : 'You will hear a chime for new notifications.', 'gray', muted ? icon.muted : icon.sound);
   });
   $('#me-card').addEventListener('click', openProfileSheet);
+  ['#logout-btn', '#logout-top'].forEach((sel) => $(sel)?.addEventListener('click', signOut));
   $('#theme-btn').addEventListener('click', () => {
     applyTheme(isDark() ? 'light' : 'dark');
     $('#theme-btn').innerHTML = isDark() ? icon.sun() : icon.moon();
