@@ -708,3 +708,60 @@ body.is-dragging .col-empty { border-color: var(--accent); color: var(--accent);
 .check-row { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 4px; cursor: pointer; }
 .check-row input { width: 16px; height: 16px; accent-color: var(--accent); }
 .rem-count { display: inline-flex; color: var(--orange); }
+
+/* v12: reminders */
+.rem-chip.past { opacity: .5; text-decoration: line-through; }
+.input.flash { animation: in-flash 1.4s ease; }
+@keyframes in-flash { 0%, 60% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--orange) 45%, transparent); border-color: var(--orange); } }
+
+/* v12: notifications that get noticed */
+.nav-item .count.alert:not(:empty) { background: var(--red); color: #fff; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; display: inline-grid; place-items: center; font-size: 11px; }
+.nav-item.active .count.alert:not(:empty) { background: #fff; color: var(--red); }
+.alert-strip { position: sticky; top: 64px; z-index: 30; display: flex; align-items: center; gap: 10px; margin: 10px 24px 0; padding: 10px 12px 10px 16px;
+  border-radius: 14px; background: linear-gradient(90deg, color-mix(in srgb, var(--orange) 18%, var(--surface)), var(--surface)); border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
+  box-shadow: 0 8px 24px rgba(0,0,0,.08); animation: strip-in .3s ease; }
+.alert-strip .as-msg { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+.alert-strip .as-ic { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; }
+.alert-strip.flash { animation: strip-flash .9s ease 2; }
+.pulse-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); flex: none; box-shadow: 0 0 0 0 rgba(255,59,48,.6); animation: pulse 1.6s infinite; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 10px rgba(255,59,48,0); } 100% { box-shadow: 0 0 0 0 rgba(255,59,48,0); } }
+@keyframes strip-in { from { transform: translateY(-8px); opacity: 0; } }
+@keyframes strip-flash { 30% { transform: scale(1.015); box-shadow: 0 0 0 4px color-mix(in srgb, var(--orange) 50%, transparent); } }
+#bell.ring svg { animation: ring .9s ease 2; transform-origin: 50% 10%; }
+@keyframes ring { 10%, 30% { transform: rotate(14deg); } 20%, 40% { transform: rotate(-14deg); } 50% { transform: rotate(0); } }
+@media (max-width: 860px) { .alert-strip { margin: 8px 12px 0; top: 58px; } }
+.notif-page { padding: 6px; }
+.notif-day { padding: 12px 12px 4px; font-size: 12px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; }
+.notif-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px; border: 0; border-radius: 12px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.notif-row:hover { background: var(--surface-2); }
+.notif-row.unread { background: var(--accent-soft); }
+.notif-row .ic { flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; }
+.nr-body { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.nr-body b { font-size: 14px; }
+.nr-body span { font-size: 14px; color: var(--text-2); }
+.notif-row time { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.unread-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: none; }
+
+/* v12: people view */
+.people-groups { display: grid; gap: 14px; }
+.pgroup { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 6px 14px 14px; }
+.pgroup summary { display: flex; align-items: center; gap: 12px; padding: 10px 0; cursor: pointer; list-style: none; flex-wrap: wrap; }
+.pgroup summary::-webkit-details-marker { display: none; }
+.pg-name { display: grid; min-width: 140px; flex: 1; }
+.pg-name span { font-size: 12px; color: var(--text-2); }
+.pg-stats { display: flex; gap: 6px; flex-wrap: wrap; }
+.pg-meter { width: 120px; }
+.pgroup:not([open]) summary { padding-bottom: 4px; }
+
+/* v12: to-do pending + task links */
+.todo-tabs { margin-bottom: 12px; }
+.todo-main { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.todo-why { font-size: 13px; color: var(--orange); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; overflow-wrap: anywhere; }
+.todo-why i { color: var(--text-3); }
+.todo-task { justify-self: start; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; border: 0;
+  background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.todo-act { color: var(--text-3); opacity: 0; }
+.todo:hover .todo-act, .todo-act:focus-visible { opacity: 1; }
+.todo-act:hover { color: var(--orange); }
+@media (hover: none) { .todo-act { opacity: 1; } }
+.todo-link-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }

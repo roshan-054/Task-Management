@@ -172,7 +172,10 @@ export class SupabaseAdapter {
     return data;
   }
   async listTodos() { return this.personal(this.sb.from('todos').select('*').order('position')); }
-  async addTodo(title, position) { return this.personal(this.sb.from('todos').insert({ title, position }).select().single()); }
+  async addTodo(title, position, task_id = null) {
+    const row = { title, position }; if (task_id) row.task_id = task_id;
+    return this.personal(this.sb.from('todos').insert(row).select().single());
+  }
   async updateTodo(id, patch) { return this.personal(this.sb.from('todos').update(patch).eq('id', id).select().single()); }
   async deleteTodo(id) { await this.personal(this.sb.from('todos').delete().eq('id', id)); }
   async clearDoneTodos() { await this.personal(this.sb.from('todos').delete().eq('done', true)); }

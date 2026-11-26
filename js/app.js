@@ -65,6 +65,9 @@ const icon = {
   chart: (s) => I('<path d="M5 20V10M12 20V4M19 20v-7"/>', s),
   team: (s) => I('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3 2.8-4.8 5.5-4.8s4.9 1.8 5.5 4.8"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.3c2.3.2 3.9 1.8 4.5 4.2"/>', s),
   people: (s) => I('<circle cx="12" cy="8" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/>', s),
+  clock: (s) => I('<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/>', s),
+  undo: (s) => I('<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/>', s),
+  people: (s) => I('<circle cx="9" cy="8" r="3"/><path d="M3.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.8 14.6c2.3.2 3.9 1.6 4.7 4.4"/>', s),
   list: (s) => I('<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/>', s),
   note: (s) => I('<path d="M6 3.5h9l4 4v13H6z"/><path d="M14.5 3.5v4.5H19M9 12h7M9 15.5h7"/>', s),
   pin: (s) => I('<path d="M9 4h6l-1 5 3 3v1.5H7V12l3-3z"/><path d="M12 13.5V20"/>', s),
@@ -184,6 +187,28 @@ function confirmDialog({ title, body = '', confirm = 'Delete', tone = 'danger' }
     $('[data-yes]', ov).addEventListener('click', () => done(true));
     document.body.appendChild(ov);
     setTimeout(() => $('[data-yes]', ov).focus(), 30);
+  });
+}
+// Like confirmDialog but with a text box. Resolves the text, or null when cancelled.
+function promptDialog({ title, body = '', placeholder = '', value = '', confirm = 'Save' } = {}) {
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'confirm-ov';
+    ov.innerHTML = `<div class="confirm-box" role="dialog" aria-modal="true" aria-labelledby="pd-title" style="text-align:left">
+      <h3 id="pd-title" style="margin-top:0">${esc(title)}</h3>${body ? `<p>${esc(body)}</p>` : ''}
+      <textarea class="textarea" id="pd-text" maxlength="1000" rows="3" placeholder="${esc(placeholder)}">${esc(value)}</textarea>
+      <div class="confirm-actions" style="margin-top:14px"><button class="btn" data-no>Cancel</button><button class="btn primary" data-yes>${esc(confirm)}</button></div></div>`;
+    const done = (v) => { document.removeEventListener('keydown', onKey, true); ov.classList.add('closing'); setTimeout(() => ov.remove(), 150); resolve(v); };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopImmediatePropagation(); e.preventDefault(); done(null); }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); done($('#pd-text', ov).value.trim()); }
+    };
+    document.addEventListener('keydown', onKey, true);
+    ov.addEventListener('mousedown', (e) => { if (e.target === ov) done(null); });
+    $('[data-no]', ov).addEventListener('click', () => done(null));
+    $('[data-yes]', ov).addEventListener('click', () => done($('#pd-text', ov).value.trim()));
+    document.body.appendChild(ov);
+    setTimeout(() => $('#pd-text', ov).focus(), 30);
   });
 }
 const sheetHead = (title) => `<div class="sheet-head"><h2>${esc(title)}</h2><button class="icon-btn" data-close aria-label="Close">${icon.x()}</button></div>`;
@@ -334,10 +359,13 @@ function onRealtime(msg) {
     const { tone, title, ic } = noteStyle(n.type);
     toast(title, n.message, tone, ic);
     chime(tone);
+    const bell = $('#bell'); if (bell) { bell.classList.remove('ring'); void bell.offsetWidth; bell.classList.add('ring'); }
+    setTimeout(() => { const st = $('#alert-strip'); if (st) { st.classList.remove('flash'); void st.offsetWidth; st.classList.add('flash'); } }, 0);
     if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
       try { new Notification(title, { body: n.message, tag: n.id }); } catch {}
     }
     updateCounts();
+    if (location.hash === '#/notifications') renderNotificationsPage();
     scheduleRefresh('tasks');
   } else if (msg.kind === 'directory') scheduleRefresh('directory');
   else scheduleRefresh('tasks');
@@ -348,11 +376,12 @@ function onRealtime(msg) {
 // =====================================================================
 function navItems() {
   const items = [
+    { hash: '#/notifications', label: 'Notifications', ic: icon.bell, count: () => state.notifications.filter((n) => !n.read).length, alert: true },
     { hash: '#/tasks', label: 'My Tasks', ic: icon.check, count: () => myTasks().filter((t) => t.status !== 'completed').length },
     { hash: '#/waiting', label: 'Waiting on Me', ic: icon.at, count: () => waitingOnMe().length },
   ];
   const personal = [{ section: 'Personal' },
-    { hash: '#/todo', label: 'To-do', ic: icon.list, count: () => state.todos.filter((t) => !t.done).length },
+    { hash: '#/todo', label: 'To-do', ic: icon.list, count: () => state.todos.filter((t) => !t.done && !t.pending).length },
     { hash: '#/notes', label: 'Notes', ic: icon.note }];
   if (isManager()) items.push({ hash: '#/assigned', label: 'Assigned by Me', ic: icon.send, count: () => assignedByMe().filter((t) => t.status !== 'completed').length });
   if (isAdmin()) items.push({ hash: '#/all', label: 'All Tasks', ic: icon.stack });
@@ -377,7 +406,7 @@ function renderShell() {
     <aside class="sidebar">
       <div class="brand"><img class="mark" src="icons/icon.svg" alt="" width="30" height="30">${esc(CONFIG.APP_NAME)}</div>
       ${items.map((it) => it.section ? `<div class="nav-label">${esc(it.section)}</div>`
-        : `<button class="nav-item" data-nav="${it.hash}">${it.ic()}<span>${esc(it.label)}</span>${it.count ? `<span class="count" data-count="${it.hash}"></span>` : ''}</button>`).join('')}
+        : `<button class="nav-item" data-nav="${it.hash}">${it.ic()}<span>${esc(it.label)}</span>${it.count ? `<span class="count ${it.alert ? 'alert' : ''}" data-count="${it.hash}"></span>` : ''}</button>`).join('')}
       <div class="spacer"></div>
       ${store.mode === 'demo' ? `<div style="padding:0 10px 8px"><span class="demo-banner">Demo mode</span></div>` : ''}
       <div class="me-row">
@@ -435,6 +464,67 @@ function updateCounts() {
   const b = $('#bell-badge');
   if (b) { b.textContent = unread > 9 ? '9+' : unread; b.classList.toggle('hidden', !unread); }
   if ($('.popover')) renderPopover();
+  // Tab title and a banner that stays until notifications are read.
+  document.title = (unread ? `(${unread}) ` : '') + CONFIG.APP_NAME;
+  renderAlertStrip();
+}
+function renderAlertStrip() {
+  const unread = state.notifications.filter((n) => !n.read);
+  let el = $('#alert-strip');
+  if (!unread.length || location.hash === '#/notifications' || !$('.main')) { el?.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'alert-strip'; el.className = 'alert-strip'; $('.topbar').after(el); }
+  const n = unread[0]; const { tone, ic } = noteStyle(n.type);
+  el.innerHTML = `<span class="pulse-dot"></span><span class="as-ic tone-${tone}">${ic(16)}</span>
+    <span class="as-msg"><b>${unread.length === 1 ? '1 new notification' : `${unread.length} new notifications`}</b> · ${esc(n.message)}</span>
+    <button class="btn sm primary" id="as-view">View</button><button class="icon-btn" id="as-close" aria-label="Mark all as read" title="Mark all as read">${icon.x(15)}</button>`;
+  $('#as-view', el).onclick = () => { location.hash = '#/notifications'; };
+  $('#as-close', el).onclick = () => markAllRead();
+}
+async function markAllRead() {
+  const ids = state.notifications.filter((n) => !n.read).map((n) => n.id);
+  if (!ids.length) return;
+  state.notifications.forEach((n) => { n.read = true; });
+  updateCounts();
+  try { await store.markNotificationsRead(ids); } catch (e) { console.warn(e); }
+}
+let noteFilter = 'unread';
+function renderNotificationsPage() {
+  const all = state.notifications;
+  const unread = all.filter((n) => !n.read);
+  if (noteFilter === 'unread' && !unread.length && all.length) noteFilter = 'all';
+  const list = noteFilter === 'unread' ? unread : all;
+  const canAsk = 'Notification' in window && Notification.permission === 'default';
+  const muted = isMuted();
+  const day = (iso) => { const d = new Date(iso); const t = new Date(); const y = new Date(); y.setDate(t.getDate() - 1);
+    return d.toDateString() === t.toDateString() ? 'Today' : d.toDateString() === y.toDateString() ? 'Yesterday' : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }); };
+  let lastDay = '';
+  $('#view').innerHTML = `
+  <section class="content narrow">
+    <div class="page-head"><div><h1>Notifications</h1><p>Everything that needs your attention, newest first.</p></div>
+      ${unread.length ? `<button class="btn" id="n-readall">${icon.check(16)} Mark all as read</button>` : ''}</div>
+    ${canAsk || muted ? `<div class="notice">${icon.bell(18)}<div>${canAsk ? 'Turn on desktop alerts so you see notifications even when this tab is in the background. ' : ''}${muted ? 'Notification sound is off. ' : ''}
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${canAsk ? `<button class="btn sm primary" id="n-desk">Enable desktop alerts</button>` : ''}${muted ? `<button class="btn sm" id="n-sound">${icon.sound(14)} Turn sound on</button>` : ''}</div></div></div>` : ''}
+    <div class="segmented" style="margin:14px 0 10px"><button class="${noteFilter === 'unread' ? 'active' : ''}" data-nf="unread">Unread<span class="n">${unread.length}</span></button><button class="${noteFilter === 'all' ? 'active' : ''}" data-nf="all">All<span class="n">${all.length}</span></button></div>
+    <div class="card notif-page">${list.length ? list.map((n) => {
+      const { tone, title, ic } = noteStyle(n.type);
+      const d = day(n.created_at); const head = d !== lastDay ? `<div class="notif-day">${esc(d)}</div>` : ''; lastDay = d;
+      return `${head}<button class="notif-row ${n.read ? '' : 'unread'}" data-n="${esc(n.id)}" data-task="${esc(n.task_id || '')}">
+        <span class="ic tone-${tone}">${ic(18)}</span>
+        <span class="nr-body"><b>${esc(title)}</b><span>${esc(n.message)}</span></span>
+        <time title="${esc(fmtDateTime(n.created_at))}">${esc(timeAgo(n.created_at))}</time>${n.read ? '' : '<span class="unread-dot"></span>'}</button>`;
+    }).join('') : `<div class="todo-empty">${icon.bell(28)}<b>You're all caught up</b><span>New notifications will show up here and in a banner at the top.</span></div>`}</div>
+  </section>`;
+  $$('[data-nf]').forEach((b) => b.addEventListener('click', () => { noteFilter = b.dataset.nf; renderNotificationsPage(); }));
+  $('#n-readall')?.addEventListener('click', async () => { await markAllRead(); renderNotificationsPage(); });
+  $('#n-desk')?.addEventListener('click', async () => { await Notification.requestPermission(); renderNotificationsPage(); });
+  $('#n-sound')?.addEventListener('click', () => { setMuted(false); chime('blue', { force: true }); renderShell(); route(); });
+  $$('.notif-row').forEach((r) => r.addEventListener('click', async () => {
+    const n = byId(state.notifications, r.dataset.n);
+    if (n && !n.read) { n.read = true; updateCounts(); store.markNotificationsRead([n.id]).catch(() => {}); }
+    const t = byId(state.tasks, r.dataset.task);
+    if (t) openTask(t); else if (r.dataset.task) toast('Task no longer available');
+    renderNotificationsPage();
+  }));
 }
 
 // ---------- notifications popover ----------
@@ -488,6 +578,7 @@ function route() {
   else if (h.startsWith('#/kpi/')) renderKpi(decodeURIComponent(h.slice(6)));
   else if (h === '#/team-kpi' && isManager()) renderTeamKpi();
   else if (h === '#/todo') renderTodos();
+  else if (h === '#/notifications') renderNotificationsPage();
   else if (h === '#/notes') renderNotes();
   else if (h === '#/people' && isManager()) renderPeople();
   else if (h === '#/platforms' && isManager()) renderPlatforms();
@@ -554,6 +645,23 @@ function renderTaskView() {
     </div>`;
   }).join('')}</div>`;
   const cards = list.length ? `<div class="card-grid">${list.map((t, i) => taskCard(t, i)).join('')}</div>` : emptyState(h);
+  // People view: one section per person (assignee; on My Tasks, who assigned it).
+  const byWho = h === '#/tasks' ? 'created_by' : 'assigned_to';
+  const groups = new Map();
+  list.forEach((t) => { const k = t[byWho]; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(t); });
+  const peopleView = list.length ? `<div class="people-groups">${[...groups.entries()]
+    .sort(([a], [b]) => person(a).full_name.localeCompare(person(b).full_name))
+    .map(([pid, ts]) => {
+      const pp = person(pid);
+      const all = pool.filter((t) => t[byWho] === pid);
+      const open = all.filter((t) => t.status !== 'completed').length;
+      const over = all.filter((t) => t.status !== 'completed' && t.due_date && t.due_date < todayISO()).length;
+      const done = all.length - open;
+      return `<details class="pgroup" open><summary>${avatar(pp)}<span class="pg-name"><b>${esc(pid === state.me.id ? pp.full_name + ' (you)' : pp.full_name)}</b><span>${esc(orgLine(pp, pp.title || roleLabel(pp.role)))}</span></span>
+        <span class="pg-stats"><span class="pill tone-blue">${open} open</span>${over ? `<span class="pill tone-red">${over} overdue</span>` : ''}<span class="pill tone-green">${done} done</span></span>
+        <span class="meter pg-meter" title="${all.length ? Math.round((done / all.length) * 100) : 0}% done"><div style="width:${all.length ? (done / all.length) * 100 : 0}%"></div></span></summary>
+        <div class="card-grid">${ts.map((t, i) => taskCard(t, i)).join('')}</div></details>`;
+    }).join('')}</div>` : emptyState(h);
 
   $('#view').innerHTML = `
   <section class="content wide">
@@ -561,9 +669,10 @@ function renderTaskView() {
       <div class="segmented view-toggle" aria-label="Layout">
         <button class="${mode === 'board' ? 'active' : ''}" data-mode="board">${icon.board(15)} Board</button>
         <button class="${mode === 'cards' ? 'active' : ''}" data-mode="cards">${icon.grid(15)} Cards</button>
+        <button class="${mode === 'people' ? 'active' : ''}" data-mode="people">${icon.people(15)} People</button>
       </div></div>
     <div class="toolbar">
-      ${mode === 'cards' ? `<div class="segmented" role="tablist">${segs.map(([id, label]) => `<button class="${f.status === id ? 'active' : ''}" data-status="${id}">${label}<span class="n">${counts[id]}</span></button>`).join('')}</div>` : ''}
+      ${mode !== 'board' ? `<div class="segmented" role="tablist">${segs.map(([id, label]) => `<button class="${f.status === id ? 'active' : ''}" data-status="${id}">${label}<span class="n">${counts[id]}</span></button>`).join('')}</div>` : ''}
       <select class="select ${f.priority !== 'all' ? 'is-set' : ''}" id="f-prio" aria-label="Priority filter">
         <option value="all">All priorities</option>${PRIORITIES.map((p) => `<option value="${p.id}" ${f.priority === p.id ? 'selected' : ''}>${p.label}</option>`).join('')}
       </select>
@@ -580,7 +689,7 @@ function renderTaskView() {
       </select>
       ${mode === 'board' ? `<span class="small muted hint">Drag a card to another column to change its status.</span>` : ''}
     </div>
-    ${mode === 'board' ? (pool.length ? board : emptyState(h)) : cards}
+    ${mode === 'board' ? (pool.length ? board : emptyState(h)) : mode === 'people' ? peopleView : cards}
   </section>`;
 
   $$('[data-mode]').forEach((b) => b.addEventListener('click', () => { setViewMode(b.dataset.mode); renderTaskView(); }));
@@ -903,6 +1012,7 @@ function openTask(t) {
       </div>
       ${timingBlock(t)}
       ${t.status !== 'completed' ? '<div data-reminders></div>' : ''}
+      ${todoButton(t)}
       <div data-remarks></div>
       ${links.length ? `<div><div class="field"><label>Related links</label></div><div class="links">${links.map((l) => `<a class="link-chip" href="${esc(l.href)}" target="_blank" rel="noopener noreferrer">${icon.link(14)}<span>${esc(l.label || l.href)}</span>${icon.arrow(12)}</a>`).join('')}</div></div>` : ''}
       ${canStatus ? `<div class="field"><label>Work status</label>
@@ -911,6 +1021,7 @@ function openTask(t) {
     </div>`, (ov) => {
     loadHistory(t, ov);
     renderRemarks(t, ov);
+    bindTodoButton(t, ov);
     const rb = $('[data-reminders]', ov);
     if (rb) mountReminders(rb, { task: t, getDue: () => ({ date: t.due_date, time: t.due_time }), live: true });
     $$('[data-set]', ov).forEach((b) => b.addEventListener('click', async () => {
@@ -972,7 +1083,7 @@ function openTaskEditor(t = null) {
       <div class="field"><label>Related links</label>
         <div id="links" style="display:grid;gap:8px">${(data.links || []).map(linkRow).join('')}</div>
         <button type="button" class="btn ghost sm" id="add-link" style="justify-self:start">${icon.plus(14)} Add link</button></div>
-      ${editing ? timingBlock(t) + '<div data-remarks></div>' : ''}
+      ${editing ? todoButton(t) + timingBlock(t) + '<div data-remarks></div>' : ''}
       <div class="error" id="t-error"></div>
     </div>
     <div class="sheet-foot">
@@ -980,7 +1091,7 @@ function openTaskEditor(t = null) {
       <button type="button" class="btn" data-close>Cancel</button>
       <button type="submit" class="btn primary">${editing ? 'Save changes' : 'Create task'}</button>
     </div></form>`, (ov) => {
-    if (editing) { loadHistory(t, ov); renderRemarks(t, ov); }
+    if (editing) { loadHistory(t, ov); renderRemarks(t, ov); bindTodoButton(t, ov); }
     // Platform picker follows the assignee's department; hidden when that department has none.
     let chosenPlat = data.platform_id || '';
     const renderPlat = () => {
@@ -999,6 +1110,12 @@ function openTaskEditor(t = null) {
     renderPlat();
     const rem = mountReminders($('[data-reminders]', ov), {
       task: t, getDue: () => ({ date: $('#t-due', ov).value || ($('#t-time', ov).value ? localToday() : ''), time: $('#t-time', ov).value }),
+      needDue: () => {
+        if (!$('#t-due', ov).value) $('#t-due', ov).value = localToday();
+        if (!$('#t-time', ov).value) { const n = new Date(Date.now() + 60 * 60e3); $('#t-time', ov).value = `${String(n.getHours()).padStart(2, '0')}:00`; }
+        const ti = $('#t-time', ov); ti.classList.add('flash'); setTimeout(() => ti.classList.remove('flash'), 1400);
+        toast('Due time set to ' + fmtTime($('#t-time', ov).value) + ' today', 'Change the date or time if needed; the reminder follows it.', 'blue', icon.clock);
+      },
       assigneeId: () => (isManager() ? $('#t-assignee', ov).value : state.me.id) || null,
     });
     $('#t-assignee', ov).addEventListener('change', () => { renderPlat(); rem.redraw(); });
@@ -1379,18 +1496,32 @@ function renderPlatforms() {
 const personalBlocked = () => state.personalError
   ? `<div class="notice">${icon.info(18)}<div>${esc(state.personalError)}</div></div>` : '';
 
+let todoTab = 'open';
 async function renderTodos() {
   try { state.todos = await store.listTodos(); state.personalError = ''; } catch (e) { state.personalError = e.message; }
-  const open = state.todos.filter((t) => !t.done).sort((a, b) => a.position - b.position);
+  const hasPending = state.todos.some((t) => 'pending' in t) || store.mode === 'demo';
+  const open = state.todos.filter((t) => !t.done && !t.pending).sort((a, b) => a.position - b.position);
+  const pending = state.todos.filter((t) => !t.done && t.pending).sort((a, b) => (b.pending_at || '').localeCompare(a.pending_at || ''));
   const done = state.todos.filter((t) => t.done).sort((a, b) => (b.done_at || '').localeCompare(a.done_at || ''));
-  const item = (t) => `<li class="todo ${t.done ? 'is-done' : ''}" data-todo="${esc(t.id)}" ${t.done ? '' : 'draggable="true"'}>
-      ${t.done ? '' : `<span class="grip" aria-hidden="true">${icon.grip(16)}</span>`}
+  const lists = { open, pending, done };
+  const linked = (t) => { const task = t.task_id ? byId(state.tasks, t.task_id) : null; return task ? `<button class="todo-task" data-open-task="${esc(task.id)}" title="Open the full task">${icon.arrow(12)} Task · ${esc(statusOf(task.status).label)}</button>` : ''; };
+  const item = (t) => `<li class="todo ${t.done ? 'is-done' : ''} ${t.pending ? 'is-pending' : ''}" data-todo="${esc(t.id)}" ${todoTab === 'open' ? 'draggable="true"' : ''}>
+      ${todoTab === 'open' ? `<span class="grip" aria-hidden="true">${icon.grip(16)}</span>` : ''}
       <button class="todo-check" data-toggle aria-label="${t.done ? 'Mark as not done' : 'Mark as done'}" aria-pressed="${t.done}">${icon.check(14)}</button>
-      <span class="todo-title" data-edit tabindex="0" title="Double-click to edit">${esc(t.title)}</span>
+      <span class="todo-main">
+        <span class="todo-title" data-edit tabindex="0" title="Double-click to edit">${esc(t.title)}</span>
+        ${t.pending ? `<span class="todo-why" data-why tabindex="0" title="Click to edit the reason">${icon.clock(12)} ${t.pending_note ? esc(t.pending_note) : '<i>No reason given</i>'}${t.pending_at ? ` · since ${esc(timeAgo(t.pending_at))}` : ''}</span>` : ''}
+        ${linked(t)}
+      </span>
       ${t.done && t.done_at ? `<span class="small muted">${esc(timeAgo(t.done_at))}</span>` : ''}
-      <button class="icon-btn todo-del" data-del aria-label="Delete">${icon.x(15)}</button>
+      ${!t.done && hasPending ? (t.pending
+        ? `<button class="icon-btn todo-act" data-unpend aria-label="Move back to To-do" title="Move back to To-do">${icon.undo(15)}</button>`
+        : `<button class="icon-btn todo-act" data-pend aria-label="Move to Pending" title="Move to Pending">${icon.clock(15)}</button>`) : ''}
+      <button class="icon-btn todo-del" data-del aria-label="Delete" title="Delete">${icon.x(15)}</button>
     </li>`;
-  const doneOpen = (() => { try { return localStorage.getItem('taskflow-todo-done') !== 'closed'; } catch { return true; } })();
+  const tab = (id, label, n) => `<button class="${todoTab === id ? 'active' : ''}" data-tab="${id}">${label}<span class="n">${n}</span></button>`;
+  const cur = lists[todoTab];
+  const empties = { open: ['All clear', 'Nothing on your list. Add something above.'], pending: ['Nothing pending', 'Use the clock button on a to-do to park it here with a reason.'], done: ['Nothing completed yet', 'Ticked-off items show up here.'] };
   $('#view').innerHTML = `
   <section class="content narrow">
     <div class="page-head"><div><h1>To-do</h1><p>Your private checklist for quick work. Only you can see it.</p></div></div>
@@ -1399,40 +1530,52 @@ async function renderTodos() {
       <span class="todo-plus">${icon.plus(18)}</span>
       <input class="todo-input" id="todo-input" maxlength="300" placeholder="Add a to-do and press Enter" autocomplete="off" aria-label="New to-do" ${state.personalError ? 'disabled' : ''}>
     </form>
+    <div class="segmented todo-tabs">${tab('open', 'To-do', open.length)}${hasPending ? tab('pending', 'Pending', pending.length) : ''}${tab('done', 'Completed', done.length)}</div>
     <div class="card todo-card">
-      ${open.length ? `<ul class="todo-list" id="todo-open">${open.map(item).join('')}</ul>`
-        : `<div class="todo-empty">${icon.check(28)}<b>All clear</b><span>Nothing on your list. Add something above.</span></div>`}
+      ${cur.length ? `<ul class="todo-list" id="todo-${todoTab}">${cur.map(item).join('')}</ul>`
+        : `<div class="todo-empty">${todoTab === 'pending' ? icon.clock(28) : icon.check(28)}<b>${empties[todoTab][0]}</b><span>${empties[todoTab][1]}</span></div>`}
     </div>
-    ${done.length ? `<details class="todo-done" ${doneOpen ? 'open' : ''}><summary><span>Completed · ${done.length}</span>
-        <button class="btn ghost sm" id="todo-clear" type="button">Clear completed</button></summary>
-      <ul class="todo-list">${done.map(item).join('')}</ul></details>` : ''}
-    <p class="small muted" style="margin-top:12px">Tip: drag to reorder, double-click to edit.</p>
+    ${todoTab === 'done' && done.length ? `<div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn ghost sm" id="todo-clear" type="button">Clear completed</button></div>` : ''}
+    ${!hasPending && !state.personalError ? `<p class="small muted" style="margin-top:12px">To use the Pending tab, run supabase/migrations/010_todo_pending.sql in Supabase.</p>` : ''}
+    <p class="small muted" style="margin-top:12px">Tip: drag to reorder, double-click to edit, use the clock to move an item to Pending.</p>
   </section>`;
 
   const input = $('#todo-input');
-  if (!state.personalError) input.focus();
+  if (!state.personalError && todoTab === 'open') input.focus();
+  $$('[data-tab]').forEach((b) => b.addEventListener('click', () => { todoTab = b.dataset.tab; renderTodos(); }));
   $('#todo-add').addEventListener('submit', async (e) => {
     e.preventDefault();
     const title = input.value.trim(); if (!title) return;
     const top = open.length ? Math.min(...open.map((t) => t.position)) - 1 : Date.now() / 1000;
     input.value = '';
-    try { const t = await store.addTodo(title, top); state.todos.push(t); renderTodos(); updateCounts(); } catch (ex) { input.value = title; fail(ex); }
+    try { const t = await store.addTodo(title, top); state.todos.push(t); todoTab = 'open'; renderTodos(); updateCounts(); } catch (ex) { input.value = title; fail(ex); }
   });
-  $('.todo-done')?.addEventListener('toggle', (e) => { try { localStorage.setItem('taskflow-todo-done', e.target.open ? 'open' : 'closed'); } catch {} });
-  $('#todo-clear')?.addEventListener('click', async (e) => {
-    e.preventDefault(); e.stopPropagation();
-    try { await store.clearDoneTodos(); state.todos = state.todos.filter((t) => !t.done); renderTodos(); toast('Completed to-dos cleared', '', 'gray', icon.trash); } catch (ex) { fail(ex); }
+  $('#todo-clear')?.addEventListener('click', async () => {
+    if (!await confirmDialog({ title: `Clear ${done.length} completed to-do${done.length === 1 ? '' : 's'}?`, confirm: 'Clear' })) return;
+    try { await store.clearDoneTodos(); state.todos = state.todos.filter((t) => !t.done); renderTodos(); } catch (ex) { fail(ex); }
   });
+  const askWhy = (t) => promptDialog({ title: t.pending ? 'Why is this pending?' : 'Move to Pending', body: t.title, placeholder: 'e.g. Waiting for the rate card from Prozo', value: t.pending_note || '', confirm: t.pending ? 'Save' : 'Move to Pending' });
   $$('[data-todo]').forEach((li) => {
     const id = li.dataset.todo; const t = byId(state.todos, id);
     $('[data-toggle]', li).addEventListener('click', async () => {
       li.classList.add('ticking');
       try {
-        Object.assign(t, await store.updateTodo(id, { done: !t.done }));
-        if (t.done) chime('green', { force: false });
+        Object.assign(t, await store.updateTodo(id, { done: !t.done, ...(t.done ? {} : hasPending ? { pending: false } : {}) }));
+        if (t.done) chime('green');
         setTimeout(() => { renderTodos(); updateCounts(); }, t.done ? 260 : 0);
       } catch (ex) { li.classList.remove('ticking'); fail(ex); }
     });
+    $('[data-pend]', li)?.addEventListener('click', async () => {
+      const why = await askWhy(t); if (why === null) return;
+      try { Object.assign(t, await store.updateTodo(id, { pending: true, pending_note: why, pending_at: new Date().toISOString() })); renderTodos(); updateCounts(); toast('Moved to Pending', why || '', 'orange', icon.clock); } catch (ex) { fail(ex); }
+    });
+    $('[data-unpend]', li)?.addEventListener('click', async () => {
+      try { Object.assign(t, await store.updateTodo(id, { pending: false })); renderTodos(); updateCounts(); toast('Back on your To-do list', t.title, 'blue', icon.undo); } catch (ex) { fail(ex); }
+    });
+    const why = $('[data-why]', li);
+    const editWhy = async () => { const v = await askWhy(t); if (v === null) return; try { Object.assign(t, await store.updateTodo(id, { pending_note: v })); renderTodos(); } catch (ex) { fail(ex); } };
+    why?.addEventListener('click', editWhy); why?.addEventListener('keydown', (e) => { if (e.key === 'Enter') editWhy(); });
+    $('[data-open-task]', li)?.addEventListener('click', () => openTask(byId(state.tasks, li.querySelector('[data-open-task]').dataset.openTask)));
     $('[data-del]', li).addEventListener('click', async () => {
       li.classList.add('removing');
       try { await store.deleteTodo(id); state.todos = state.todos.filter((x) => x.id !== id); setTimeout(() => { renderTodos(); updateCounts(); }, 180); } catch (ex) { li.classList.remove('removing'); fail(ex); }
@@ -1457,7 +1600,7 @@ async function renderTodos() {
     title.addEventListener('dblclick', startEdit);
     title.addEventListener('keydown', (e) => { if (e.key === 'Enter') startEdit(); });
   });
-  // Drag to reorder (open items only). The new position sits between its neighbours.
+  // Drag to reorder (To-do tab). The new position sits between its neighbours.
   const list = $('#todo-open');
   if (list) {
     let dragging = null;
@@ -1602,7 +1745,7 @@ const askDesktopAlerts = () => { if ('Notification' in window && Notification.pe
 
 // The reminders field. getDue() gives { date, time } from the form or task;
 // opts.assignee (id) shows "Also remind ..." for the task's creator.
-function mountReminders(box, { task, getDue, live = false, assigneeId = null }) {
+function mountReminders(box, { task, getDue, live = false, assigneeId = null, needDue = null }) {
   const sel = reminderSelection(task?.id, state.me.id);
   const aId0 = task ? task.assigned_to : null;
   let alsoAssignee = !!(task && aId0 !== state.me.id && myReminders(task.id, aId0).some((r) => r.created_by === state.me.id));
@@ -1617,17 +1760,23 @@ function mountReminders(box, { task, getDue, live = false, assigneeId = null }) 
         ${REMIND_OFFSETS.map(([m, l]) => {
           const at = due ? new Date(due - m * 60e3) : null;
           const past = at && at < Date.now();
-          return `<button type="button" class="rem-chip ${sel.offsets.has(m) ? 'on' : ''}" data-off="${m}" ${!due || (past && !sel.offsets.has(m)) ? 'disabled' : ''} title="${at ? esc(fmtDateTime(at.toISOString())) : 'Set a due date first'}">${esc(l)}</button>`;
+          return `<button type="button" class="rem-chip ${sel.offsets.has(m) ? 'on' : ''} ${past && !sel.offsets.has(m) ? 'past' : ''}" data-off="${m}" title="${at ? esc((past ? 'Already passed: ' : '') + fmtDateTime(at.toISOString())) : 'Counts back from the due time'}">${esc(l)}</button>`;
         }).join('')}
         ${sel.customs.map((iso, i) => `<span class="rem-chip on custom">${icon.bell(12)} ${esc(fmtDateTime(iso))}<button type="button" data-rm-custom="${i}" aria-label="Remove">${icon.x(12)}</button></span>`).join('')}
         ${adding ? `<span class="rem-add"><input type="datetime-local" class="input" id="rem-dt"><button type="button" class="btn sm primary" id="rem-dt-ok">Add</button></span>`
           : `<button type="button" class="rem-chip ghost" id="rem-custom">${icon.plus(12)} Pick date & time</button>`}
       </div>
-      ${!due ? '<span class="small muted">Set a due date or time to use the quick options.</span>' : !time ? '<span class="small muted">No time set, so reminders count back from 9:00 AM on the due date.</span>' : ''}
+      ${!due ? '<span class="small muted">Pick a reminder and then set the time it counts back from.</span>' : !time ? '<span class="small muted">No time set, so reminders count back from 9:00 AM on the due date.</span>' : ''}
       ${aId && aId !== state.me.id ? `<label class="check-row"><input type="checkbox" id="rem-assignee" ${alsoAssignee ? 'checked' : ''}> Also remind ${esc(person(aId).full_name)}</label>` : ''}
     </div>`;
     $$('[data-off]', box).forEach((b) => b.addEventListener('click', async () => {
       const m = Number(b.dataset.off);
+      // No due time yet: ask for one (the form fills in today and focuses Time).
+      if (!dueMoment(getDue().date, getDue().time)) {
+        if (needDue) { needDue(); } else return toast('This task has no due date', 'Ask the person who assigned it, or pick a custom date and time.', 'orange', icon.bell);
+      }
+      const d2 = getDue(); const due2 = dueMoment(d2.date, d2.time);
+      if (due2 && !sel.offsets.has(m) && new Date(due2 - m * 60e3) < Date.now()) return toast('That time has already passed', `Pick a shorter reminder, or move the due time later.`, 'orange', icon.bell);
       sel.offsets.has(m) ? sel.offsets.delete(m) : sel.offsets.add(m);
       askDesktopAlerts(); draw(); if (live) await save();
     }));
@@ -1664,6 +1813,30 @@ function startReminderLoop() {
   reminderTimer = setInterval(tick, 30e3);
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.me) store.fireMyReminders().catch(() => {}); });
+
+// "Add to To-do": a to-do that only carries the title and links back to the task.
+const todoFor = (taskId) => state.todos.find((x) => x.task_id === taskId && !x.done);
+function todoButton(t) {
+  if (state.personalError || t.status === 'completed') return '';
+  const td = todoFor(t.id);
+  return `<div class="todo-link-row" data-todo-row>${td
+    ? `<span class="small muted">${icon.list(15)} On your To-do list${td.pending ? ' (pending)' : ''}</span><a class="btn ghost sm" href="#/todo" data-go-todo>Open To-do</a>`
+    : `<button type="button" class="btn sm" data-add-todo>${icon.list(15)} Add to my To-do</button>`}</div>`;
+}
+function bindTodoButton(t, ov) {
+  $('[data-go-todo]', ov)?.addEventListener('click', () => closeSheet());
+  $('[data-add-todo]', ov)?.addEventListener('click', async (e) => {
+    e.currentTarget.disabled = true;
+    try {
+      const open = state.todos.filter((x) => !x.done && !x.pending);
+      const top = open.length ? Math.min(...open.map((x) => x.position)) - 1 : Date.now() / 1000;
+      const td = await store.addTodo(t.title.slice(0, 300), top, t.id);
+      state.todos.push(td); updateCounts();
+      $('[data-todo-row]', ov).outerHTML = todoButton(t); bindTodoButton(t, ov);
+      toast('Added to your To-do', t.title, 'green', icon.list);
+    } catch (ex) { fail(ex); }
+  });
+}
 
 function genPassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';

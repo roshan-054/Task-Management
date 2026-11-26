@@ -476,10 +476,10 @@ export class LocalAdapter {
 
   // ---------- personal to-do & notes (mirrors migrations/007_todos_notes.sql) ----------
   async listTodos() { const me = this.me(this.db); return clone(this.db.todos.filter((t) => t.user_id === me.id)).sort((a, b) => a.position - b.position); }
-  async addTodo(title, position) {
+  async addTodo(title, position, task_id = null) {
     const db = this.db; const me = this.me(db);
     title = (title || '').trim(); if (!title) throw new Error('Write something first.');
-    const t = { id: uid(), user_id: me.id, title: title.slice(0, 300), done: false, position: position ?? Date.now() / 1000, created_at: now(), done_at: null };
+    const t = { id: uid(), user_id: me.id, title: title.slice(0, 300), done: false, pending: false, pending_note: '', pending_at: null, task_id, position: position ?? Date.now() / 1000, created_at: now(), done_at: null };
     db.todos.push(t); this.save(db); return clone(t);
   }
   async updateTodo(id, patch) {
