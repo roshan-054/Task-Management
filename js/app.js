@@ -49,6 +49,7 @@ const timeAgo = (iso) => {
 const fmtTime = (hhmm) => hhmm ? new Date(`2000-01-01T${hhmm}:00`).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
 // The moment a task is due: its date at its time (9:00 when no time is set).
 const localToday = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 10); };
+const localDay = (iso) => { const d = new Date(iso); return new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 10); };
 const dueMoment = (date, time) => date ? new Date(`${date}T${time || '09:00'}:00`) : null;
 const fmtDue = (t) => t.due_date ? fmtDate(t.due_date) + (t.due_time ? ', ' + fmtTime(t.due_time) : '') : '';
 const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
@@ -1527,41 +1528,49 @@ async function renderTodos() {
   const linked = (t) => { const task = t.task_id ? byId(state.tasks, t.task_id) : null; return task ? `<button class="todo-task" data-open-task="${esc(task.id)}" title="Open the full task">${icon.arrow(12)} Task · ${esc(statusOf(task.status).label)}</button>` : ''; };
   const ago = (iso) => timeAgo(iso).replace(/^Just now$/, 'just now');
   const when = (t) => t.done && t.done_at ? `Done ${ago(t.done_at)}` : t.pending && t.pending_at ? `Pending ${ago(t.pending_at)}` : t.created_at ? `Added ${ago(t.created_at)}` : '';
-  const item = (t) => `<li class="todo tdc ${t.done ? 'is-done' : ''} ${t.pending ? 'is-pending' : ''}" data-todo="${esc(t.id)}" ${todoTab === 'open' ? 'draggable="true"' : ''}>
-      <div class="tdc-top">
-        <button class="todo-check" data-toggle aria-label="${t.done ? 'Mark as not done' : 'Mark as done'}" aria-pressed="${t.done}" title="${t.done ? 'Mark as not done' : 'Mark as done'}">${icon.check(14)}</button>
-        <span class="todo-title" data-edit tabindex="0" title="Double-click to edit">${esc(t.title)}</span>
-        ${todoTab === 'open' ? `<span class="grip" aria-hidden="true" title="Drag to reorder">${icon.grip(16)}</span>` : ''}
+  const item = (t) => `<li class="todo trow ${t.done ? 'is-done' : ''} ${t.pending ? 'is-pending' : ''}" data-todo="${esc(t.id)}" ${todoTab === 'open' ? 'draggable="true"' : ''}>
+      ${todoTab === 'open' ? `<span class="grip" aria-hidden="true" title="Drag to reorder">${icon.grip(14)}</span>` : '<span class="grip-sp"></span>'}
+      <button class="todo-check" data-toggle aria-label="${t.done ? 'Mark as not done' : 'Mark as done'}" aria-pressed="${t.done}" title="${t.done ? 'Mark as not done' : 'Mark as done'}">${icon.check(13)}</button>
+      <div class="trow-main">
+        <span class="todo-title" data-edit tabindex="0" title="Click to edit">${esc(t.title)}</span>
+        <div class="trow-meta">
+          ${t.pending ? `<button class="todo-why" data-why title="Click to edit the reason">${icon.clock(12)}<span>${t.pending_note ? esc(t.pending_note) : '<i>No reason given</i>'}</span></button>` : ''}
+          ${linked(t)}
+          <span class="trow-when">${esc(when(t))}</span>
+        </div>
       </div>
-      ${t.pending ? `<div class="todo-why" data-why tabindex="0" title="Click to edit the reason">${icon.clock(13)}<span>${t.pending_note ? esc(t.pending_note) : '<i>No reason given</i>'}</span></div>` : ''}
-      ${linked(t) ? `<div>${linked(t)}</div>` : ''}
-      <div class="tdc-foot">
-        <span class="small muted">${esc(when(t))}</span>
-        <span class="tdc-acts">
-          ${!t.done && hasPending ? (t.pending
-            ? `<button class="btn sm todo-act" data-unpend title="Move back to To-do">${icon.undo(14)} Resume</button>`
-            : `<button class="btn sm todo-act" data-pend title="Move to Pending with a reason">${icon.clock(14)} Pending</button>`) : ''}
-          <button class="icon-btn todo-del" data-del aria-label="Delete" title="Delete">${icon.trash(15)}</button>
-        </span>
+      <div class="trow-acts">
+        ${!t.done && hasPending ? (t.pending
+          ? `<button class="icon-btn todo-act" data-unpend aria-label="Move back to To-do" title="Move back to To-do">${icon.undo(15)}</button>`
+          : `<button class="icon-btn todo-act" data-pend aria-label="Move to Pending" title="Move to Pending (add a reason)">${icon.clock(15)}</button>`) : ''}
+        <button class="icon-btn todo-del" data-del aria-label="Delete" title="Delete">${icon.trash(15)}</button>
       </div>
     </li>`;
   const tab = (id, label, n) => `<button class="${todoTab === id ? 'active' : ''}" data-tab="${id}">${label}<span class="n">${n}</span></button>`;
   const cur = lists[todoTab];
-  const empties = { open: ['All clear', 'Nothing on your list. Add something above.'], pending: ['Nothing pending', 'Use the Pending button on a to-do to park it here with a reason.'], done: ['Nothing completed yet', 'Ticked-off items show up here.'] };
+  const empties = { open: ['All clear', 'Nothing on your list. Add something above.'], pending: ['Nothing pending', 'Use the clock on a to-do to park it here with a reason.'], done: ['Nothing completed yet', 'Ticked-off items show up here.'] };
+  const today = localToday();
+  const doneToday = done.filter((t) => t.done_at && localDay(t.done_at) === today).length;
+  const pct = open.length + doneToday ? Math.round(doneToday / (open.length + doneToday) * 100) : 0;
   $('#view').innerHTML = `
-  <section class="content">
-    <div class="page-head"><div><h1>To-do</h1><p>Your private checklist for quick work. Only you can see it.</p></div></div>
+  <section class="content narrow">
+    <div class="page-head"><div><h1>To-do</h1><p>Your private checklist for quick work. Only you can see it.</p></div>
+      <div class="tday" title="Done today vs still open"><div class="tday-ring" style="--p:${pct}"><span>${pct}%</span></div><div><b>${doneToday} done today</b><span>${open.length} still to do${pending.length ? ` · ${pending.length} pending` : ''}</span></div></div>
+    </div>
     ${personalBlocked()}
-    <form class="todo-add card" id="todo-add">
-      <span class="todo-plus">${icon.plus(18)}</span>
-      <input class="todo-input" id="todo-input" maxlength="300" placeholder="Add a to-do and press Enter" autocomplete="off" aria-label="New to-do" ${state.personalError ? 'disabled' : ''}>
-    </form>
-    <div class="segmented todo-tabs">${tab('open', 'To-do', open.length)}${hasPending ? tab('pending', 'Pending', pending.length) : ''}${tab('done', 'Completed', done.length)}</div>
-    ${cur.length ? `<ul class="todo-grid" id="todo-${todoTab}">${cur.map(item).join('')}</ul>`
-      : `<div class="card todo-card"><div class="todo-empty">${todoTab === 'pending' ? icon.clock(28) : icon.check(28)}<b>${empties[todoTab][0]}</b><span>${empties[todoTab][1]}</span></div></div>`}
-    ${todoTab === 'done' && done.length ? `<div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn ghost sm" id="todo-clear" type="button">Clear completed</button></div>` : ''}
+    <div class="card tpanel">
+      <form class="tadd" id="todo-add">
+        <span class="todo-plus">${icon.plus(18)}</span>
+        <input class="todo-input" id="todo-input" maxlength="300" placeholder="Add a to-do…" autocomplete="off" aria-label="New to-do" ${state.personalError ? 'disabled' : ''}>
+        <kbd>Enter</kbd>
+      </form>
+      <div class="tpanel-tabs"><div class="segmented todo-tabs">${tab('open', 'To-do', open.length)}${hasPending ? tab('pending', 'Pending', pending.length) : ''}${tab('done', 'Completed', done.length)}</div>
+        ${todoTab === 'done' && done.length ? `<button class="btn ghost sm" id="todo-clear" type="button">Clear completed</button>` : ''}</div>
+      ${cur.length ? `<ul class="tlist" id="todo-${todoTab}">${cur.map(item).join('')}</ul>`
+        : `<div class="todo-empty">${todoTab === 'pending' ? icon.clock(28) : icon.check(28)}<b>${empties[todoTab][0]}</b><span>${empties[todoTab][1]}</span></div>`}
+    </div>
     ${!hasPending && !state.personalError ? `<p class="small muted" style="margin-top:12px">To use the Pending tab, run supabase/migrations/010_todo_pending.sql in Supabase.</p>` : ''}
-    <p class="small muted" style="margin-top:12px">Tip: drag cards to reorder, double-click a title to edit it. Ticking a to-do that came from a task also completes the task.</p>
+    <p class="small muted" style="margin-top:12px">Click a to-do to edit it, drag the dots to reorder, and use the clock to park it in Pending with a reason. Ticking a to-do that came from a task also completes the task.</p>
   </section>`;
 
   const input = $('#todo-input');
@@ -1591,7 +1600,7 @@ async function renderTodos() {
           if (canChangeStatus(task)) await changeStatus(task.id, 'completed');
           else toast('To-do done', 'The task itself stays open: only the assignee or the person who created it can complete it.', 'orange', icon.lock);
         }
-        setTimeout(() => { renderTodos(); updateCounts(); }, t.done ? 260 : 0);
+        setTimeout(() => { renderTodos(); updateCounts(); }, t.done ? 480 : 0);
       } catch (ex) { li.classList.remove('ticking'); fail(ex); }
     });
     $('[data-pend]', li)?.addEventListener('click', async () => {
@@ -1626,7 +1635,7 @@ async function renderTodos() {
       ed.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } if (e.key === 'Escape') finish(false); });
       ed.addEventListener('blur', () => finish(true));
     };
-    title.addEventListener('dblclick', startEdit);
+    title.addEventListener('click', startEdit);
     title.addEventListener('keydown', (e) => { if (e.key === 'Enter') startEdit(); });
   });
   // Drag to reorder (To-do tab). The new position sits between its neighbours.
