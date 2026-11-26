@@ -147,7 +147,11 @@ function toast(title, body = '', tone = 'blue', ic = icon.info) {
   $('#toasts').appendChild(el);
   setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, 4200);
 }
-const fail = (e) => toast('Something went wrong', e?.message || String(e), 'red', icon.info);
+const fail = (e) => {
+  const m = e?.message || String(e);
+  if (/permission denied for function/i.test(m)) return toast('Database permissions need a repair', 'Ask your admin to run supabase/migrations/014_fix_function_permissions.sql in Supabase.', 'red', icon.info);
+  toast('Something went wrong', m, 'red', icon.info);
+};
 
 function openSheet(html, onMount) {
   closeSheet(true);
