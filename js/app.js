@@ -81,6 +81,7 @@ const icon = {
   search: (s) => I('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>', s),
   link: (s) => I('<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>', s),
   lock: (s) => I('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>', s),
+  eye: (s) => I('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', s),
   cal: (s) => I('<rect x="4" y="5" width="16" height="15" rx="3"/><path d="M4 10h16M9 3v4M15 3v4"/>', s),
   x: (s) => I('<path d="M6 6l12 12M18 6L6 18"/>', s),
   trash: (s) => I('<path d="M5 7h14M10 7V5h4v2M7 7l1 13h8l1-13"/>', s),
@@ -232,7 +233,7 @@ function renderAuth(mode = 'signin') {
   const titles = {
     signin: ['Welcome back', 'Sign in to see your tasks.'],
     activate: ['Activate your account', 'Use the email your manager or admin added.'],
-    reset: ['Reset password', 'We will email you a link to set a new password.'],
+    reset: ['Forgot your password?', 'Ask your admin to set a temporary password for you (People & Teams → your name). Sign in with it and you\'ll be asked to choose your own. Or get a reset link by email:'],
   };
   app().innerHTML = `
   <main class="auth">
@@ -245,7 +246,7 @@ function renderAuth(mode = 'signin') {
         <div class="field"><label for="f-email">Email</label><input class="input" id="f-email" type="email" autocomplete="email" placeholder="name@company.com" required></div>
         ${mode !== 'reset' ? `<div class="field"><label for="f-pass">Password</label><input class="input" id="f-pass" type="password" autocomplete="${mode === 'signin' ? 'current-password' : 'new-password'}" placeholder="${mode === 'signin' ? 'Password' : 'At least 6 characters'}" required></div>` : ''}
         <div class="error" id="auth-error"></div>
-        <button class="btn primary block" type="submit">${mode === 'signin' ? 'Sign in' : mode === 'activate' ? 'Create account' : 'Send reset link'}</button>
+        <button class="btn primary block" type="submit">${mode === 'signin' ? 'Sign in' : mode === 'activate' ? 'Create account' : 'Email me a reset link'}</button>
       </form>
       <div class="switch">
         ${mode === 'signin' ? `New here? <a href="#" data-mode="activate">Activate your account</a><br><a href="#" data-mode="reset" class="small">Forgot password?</a>`
@@ -290,6 +291,41 @@ function renderAuth(mode = 'signin') {
       err.textContent = /Database error saving new user/i.test(ex.message)
         ? 'This email has not been invited. Ask your admin or manager to add you first.' : friendlyAuthError(ex);
     } finally { btn.disabled = false; }
+  });
+}
+
+// Password field with a show/hide eye.
+function pwInput(id, value = '', shown = false) {
+  return `<span class="pw-wrap"><input class="input" id="${id}" type="${shown ? 'text' : 'password'}" value="${esc(value)}" autocomplete="new-password" spellcheck="false"><button type="button" class="pw-eye" data-eye="${id}" aria-label="Show or hide password" title="Show or hide">${icon.eye(16)}</button></span>`;
+}
+function bindPwInput(root) {
+  $$('[data-eye]', root).forEach((b) => b.addEventListener('click', () => { const i = $('#' + b.dataset.eye, root); i.type = i.type === 'password' ? 'text' : 'password'; i.focus(); }));
+}
+// Change your own password. forced = signed in with a temporary password from an admin.
+function openChangePassword(forced = false) {
+  openSheet(`${sheetHead(forced ? 'Choose your own password' : 'Change password')}
+    <form id="cp-form" novalidate><div class="sheet-body">
+      ${forced ? `<div class="notice">${icon.info(18)}<div>You signed in with a temporary password from your admin. Choose a password only you know.</div></div>` : ''}
+      <div class="field"><label for="cp-new">New password</label>${pwInput('cp-new')}<span class="small muted">At least 8 characters.</span></div>
+      <div class="field"><label for="cp-again">Type it again</label>${pwInput('cp-again')}</div>
+      <div class="error" id="cp-err"></div>
+    </div><div class="sheet-foot">
+      <button type="button" class="btn" data-close>${forced ? 'Later' : 'Cancel'}</button>
+      <button class="btn primary" type="submit">Save password</button></div></form>`, (ov) => {
+    bindPwInput(ov);
+    setTimeout(() => $('#cp-new', ov)?.focus(), 50);
+    $('#cp-form', ov).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const a = $('#cp-new', ov).value, b = $('#cp-again', ov).value, err = $('#cp-err', ov);
+      if (a.length < 8) { err.textContent = 'Use at least 8 characters.'; return; }
+      if (a !== b) { err.textContent = 'The two passwords don\'t match.'; return; }
+      const btn = $('button[type=submit]', ov); btn.disabled = true;
+      try {
+        await store.updatePassword(a);
+        if (state.me.must_change_password) { try { await store.updateProfile(state.me.id, { must_change_password: false }); state.me.must_change_password = false; } catch {} }
+        closeSheet(); toast('Password changed', 'Use your new password next time you sign in.', 'green', icon.check);
+      } catch (ex) { err.textContent = friendlyAuthError(ex); btn.disabled = false; }
+    });
   });
 }
 
@@ -344,6 +380,7 @@ async function boot() {
     unsubscribe = store.subscribe(me.id, onRealtime);
     startReminderLoop();
     if (!location.hash || location.hash === '#') location.hash = '#/tasks'; else route();
+    if (me.must_change_password) setTimeout(() => openChangePassword(true), 400);
   } catch (e) {
     console.error(e);
     renderAuth();
@@ -1951,11 +1988,13 @@ function openActivate(inv) {
   openSheet(`${sheetHead('Activate account')}
     <form id="act-form" novalidate><div class="sheet-body">
       <div class="notice">${icon.info(18)}<div>This creates the login for <b>${esc(inv.full_name || inv.email)}</b> (${esc(inv.email)}) right now. Share the password with them privately; they can change it after signing in.</div></div>
-      <div class="field"><label>Temporary password</label>
-        <div style="display:flex;gap:8px"><input class="input" id="act-pw" value="${esc(pw)}" autocomplete="off"><button type="button" class="btn" id="act-gen">New</button></div></div>
+      <div class="field"><label>Temporary password <span class="muted" style="font-weight:400">(type your own, or press Generate)</span></label>
+        <div class="pw-set">${pwInput('act-pw', pw, true)}<button type="button" class="btn" id="act-gen">Generate</button></div>
+        <span class="small muted">They'll be asked to choose their own password after their first sign-in.</span></div>
       <div class="error" id="act-error"></div>
     </div><div class="sheet-foot"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit">Activate account</button></div></form>`, (ov) => {
-    $('#act-gen', ov).addEventListener('click', () => { $('#act-pw', ov).value = genPassword(); });
+    bindPwInput(ov);
+    $('#act-gen', ov).addEventListener('click', () => { const i = $('#act-pw', ov); i.value = genPassword(); i.type = 'text'; });
     $('#act-form', ov).addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = $('button[type=submit]', ov); btn.disabled = true;
@@ -2065,8 +2104,9 @@ function openPersonEditor(p) {
       </div>
       ${p.id === state.me.id ? '<div class="small muted">You can change your own department, team and manager here. Your role stays Admin so you cannot lock yourself out; admins already have every manager permission.</div>' : ''}
       <div class="pw-box">
-        <div><b>Password</b><div class="small muted">Passwords are stored encrypted, so nobody (including admins) can see an existing one. You can set a new temporary password instead.</div></div>
-        <button type="button" class="btn sm" id="p-reset">Reset password</button>
+        <div><b>Set a temporary password</b><div class="small muted">Nobody (including admins) can see an existing password. Type one or generate one; ${p.id === state.me.id ? 'this changes your own password.' : `${esc(p.full_name)} will be asked to choose their own after signing in with it.`}</div></div>
+        <div class="pw-set">${pwInput('p-newpw', '')}<button type="button" class="btn sm" id="p-gen" title="Generate a random password">Generate</button><button type="button" class="btn sm primary" id="p-reset">Set password</button></div>
+        <div class="error" id="p-pw-err"></div>
         <div class="pw-result hidden" id="p-pw-result"></div>
       </div>
       <div class="small muted">${esc(p.email)}</div>
@@ -2076,23 +2116,27 @@ function openPersonEditor(p) {
       <button type="button" class="btn" id="p-kpi">View KPIs</button>
       <button class="btn primary" type="submit">Save</button></div></form>`, (ov) => {
     $('#p-dept', ov).addEventListener('change', (e) => { $('#p-team', ov).innerHTML = teamOptions(e.target.value); });
+    bindPwInput(ov);
+    $('#p-gen', ov).addEventListener('click', () => { const i = $('#p-newpw', ov); i.value = genPassword(); i.type = 'text'; i.focus(); });
     $('#p-reset', ov).addEventListener('click', async (e) => {
       const b = e.currentTarget;
-      if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.textContent = 'Click again to set a new password'; return; }
+      const pw = $('#p-newpw', ov).value;
+      $('#p-pw-err', ov).textContent = '';
+      if (pw.length < 8) { $('#p-pw-err', ov).textContent = 'Use at least 8 characters.'; $('#p-newpw', ov).focus(); return; }
+      if (!await confirmDialog({ title: `Set a new password for ${p.id === state.me.id ? 'yourself' : p.full_name}?`, body: 'Their current password stops working straight away.', confirm: 'Set password', tone: 'blue' })) return;
       b.disabled = true;
-      const pw = genPassword();
       try {
         await store.adminResetPassword(p.id, pw);
         const box = $('#p-pw-result', ov);
         box.classList.remove('hidden');
-        box.innerHTML = `<div class="small muted">New temporary password for ${esc(p.full_name)} (shown once):</div>
-          <div style="display:flex;gap:8px;align-items:center"><code class="pw-code">${esc(pw)}</code><button type="button" class="btn sm primary" id="p-pw-copy">Copy login details</button></div>`;
+        box.innerHTML = `<div class="small muted">Password set for ${esc(p.full_name)}. Share it privately:</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><code class="pw-code">${esc(pw)}</code><button type="button" class="btn sm primary" id="p-pw-copy">Copy login details</button></div>`;
         $('#p-pw-copy', ov).addEventListener('click', async () => {
           const text = `${CONFIG.APP_NAME}: ${location.origin + location.pathname}\nEmail: ${p.email}\nTemporary password: ${pw}\nPlease change it after signing in (click your name, bottom left).`;
           try { await navigator.clipboard.writeText(text); toast('Copied', 'Share it with them privately.', 'green', icon.check); } catch { prompt('Copy this', text); }
         });
-        b.textContent = 'Password reset';
-      } catch (ex) { b.disabled = false; b.dataset.confirm = ''; b.textContent = 'Reset password'; fail(new Error(/admin_reset_password|function/i.test(ex.message) && !/Only an admin/.test(ex.message) ? 'Run supabase/migrations/004_people_admin.sql in Supabase first.' : ex.message)); }
+        b.textContent = 'Password set'; setTimeout(() => { b.disabled = false; b.textContent = 'Set password'; }, 2500);
+      } catch (ex) { b.disabled = false; fail(new Error(/admin_reset_password|function/i.test(ex.message) && !/Only an admin/.test(ex.message) ? 'Run supabase/migrations/004_people_admin.sql in Supabase first.' : ex.message)); }
     });
     $('#p-kpi', ov).addEventListener('click', () => { closeSheet(); location.hash = '#/kpi/' + encodeURIComponent(p.id); });
     $('#p-delete', ov)?.addEventListener('click', () => { closeSheet(true); openDeleteUser(p); });
@@ -2167,19 +2211,18 @@ function openProfileSheet() {
         <div class="field"><label>Full name</label><input class="input" id="me-name" value="${esc(me.full_name)}"></div>
         <div class="field"><label>Job title</label><input class="input" id="me-title" value="${esc(me.title)}"></div>
       </div>
-      <div class="field"><label>New password (optional)</label><input class="input" type="password" id="me-pass" autocomplete="new-password" placeholder="Leave blank to keep current"></div>
+      <div class="pw-box"><div><b>Password</b><div class="small muted">Change it any time.</div></div><button type="button" class="btn sm" id="me-chpw">${icon.lock(14)} Change password</button></div>
       ${store.mode === 'demo' ? `<button type="button" class="btn sm" id="reset-demo" style="justify-self:start">Reset demo data</button>` : ''}
     </div><div class="sheet-foot">
       <button type="button" class="btn danger left" id="sign-out">${icon.out(16)} Sign out</button>
       <button class="btn primary" type="submit">Save</button></div></form>`, (ov) => {
     $('#sign-out', ov).addEventListener('click', signOut);
+    $('#me-chpw', ov).addEventListener('click', () => { closeSheet(true); setTimeout(() => openChangePassword(false), 50); });
     $('#reset-demo', ov)?.addEventListener('click', async () => { store.resetDemo(); await signOut(); toast('Demo data reset'); });
     $('#me-form', ov).addEventListener('submit', async (e) => {
       e.preventDefault();
       try {
         await store.updateProfile(me.id, { full_name: $('#me-name', ov).value.trim() || me.full_name, title: $('#me-title', ov).value.trim() });
-        const pw = $('#me-pass', ov).value;
-        if (pw) { if (pw.length < 6) throw new Error('Password should be at least 6 characters.'); await store.updatePassword(pw); }
         await loadAll(); closeSheet(); renderShell(); route(); toast('Profile saved', '', 'green', icon.check);
       } catch (ex) { fail(ex); }
     });

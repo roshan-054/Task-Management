@@ -280,7 +280,7 @@ export class LocalAdapter {
     if (db.profiles.some((p) => p.email === e)) throw new Error('An account with this email already exists.');
     if (password.length < 6) throw new Error('Password should be at least 6 characters.');
     db.profiles.push({ id: uid(), email: e, full_name: inv.full_name || fullName || e.split('@')[0], title: inv.title || '',
-      role: inv.role, department_id: inv.department_id, team_id: inv.team_id, manager_id: inv.manager_id || null, active: true, created_at: now(), password });
+      role: inv.role, department_id: inv.department_id, team_id: inv.team_id, manager_id: inv.manager_id || null, active: true, created_at: now(), password, must_change_password: true });
     inv.accepted_at = now();
     this.save(db); this.emit({ kind: 'directory' });
     return { needsConfirmation: false };
@@ -320,7 +320,7 @@ export class LocalAdapter {
     if (password.length < 8) throw new Error('Use at least 8 characters.');
     const p = db.profiles.find((x) => x.id === userId);
     if (!p) throw new Error('Person not found.');
-    p.password = password; this.save(db);
+    p.password = password; p.must_change_password = p.id !== this.me(db).id; this.save(db);
   }
   async deleteInvitation(email) {
     const db = this.db; const me = this.me(db);
