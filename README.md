@@ -81,6 +81,7 @@ When a new version adds database changes, run the matching file in `supabase/mig
 | `009_reminders.sql` | Optional due time on tasks, and reminders (at time, 15 min, 1 hour, 1 day before, or a custom time) delivered as notifications; scheduled every minute with pg_cron |
 | `010_todo_pending.sql` | To-do items can be moved to Pending with a reason, and a to-do can link back to a task |
 | `011_admin_create_login.sql` | "Activate now" creates the login inside the database (already confirmed), so no email is sent and the Supabase email limit no longer applies |
+| `012_kpi_visibility.sql` | Managers see performance only for themselves and the team members they manage (never other managers or admins); admins see everyone |
 
 **Activating people from the panel with "Confirm email" on:** Supabase still sends them a confirmation email, and they must click it before their first sign-in. Supabase's built-in email service only sends a few emails per hour; if you add many people at once, set up custom SMTP under **Authentication → Emails**, or turn **Confirm email** off and use **Activate account now** when you add each person (so no invitation is left waiting for someone else to claim).
 

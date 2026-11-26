@@ -1273,7 +1273,7 @@ async function renderKpi(userId) {
   $('#view').innerHTML = `<section class="content"><div class="page-head"><div><h1>${self ? 'My Performance' : 'Performance'}</h1><p>${self ? 'Your KPI profile, built from the tasks assigned to you.' : ''}</p></div></div><div class="boot" style="min-height:200px"><div class="spinner"></div></div></section>`;
   try {
     const [rows, platRows] = await Promise.all([store.kpiStats(self ? 'me' : 'user', self ? null : userId), store.kpiPlatforms(self ? 'me' : 'user', self ? null : userId).catch(() => [])]);
-    if (!rows.length) { $('#view .content').innerHTML = `<div class="empty"><h3>Not available</h3><p>You can view KPIs for people in your department only.</p></div>`; return; }
+    if (!rows.length) { $('#view .content').innerHTML = `<div class="empty"><h3>Not available</h3><p>Managers can see the performance of their own team members only. Only admins can see other managers and admins.</p></div>`; return; }
     const k = computeKpi(rows[0]);
     const p = person(userId);
     $('#view .content').innerHTML = `
@@ -1285,7 +1285,7 @@ async function renderKpi(userId) {
 
 async function renderTeamKpi() {
   const title = 'Team Performance';
-  $('#view').innerHTML = `<section class="content"><div class="page-head"><div><h1>${title}</h1><p>${isAdmin() ? 'Combined performance of everyone, across all departments.' : `Combined performance of everyone in ${esc(deptName(state.me.department_id))}.`}</p></div></div><div class="boot" style="min-height:200px"><div class="spinner"></div></div></section>`;
+  $('#view').innerHTML = `<section class="content"><div class="page-head"><div><h1>${title}</h1><p>${isAdmin() ? 'Combined performance of everyone, across all departments.' : 'Combined performance of you and the team members you manage. Other managers and admins are not included.'}</p></div></div><div class="boot" style="min-height:200px"><div class="spinner"></div></div></section>`;
   try {
     const [rawRows, platRows] = await Promise.all([store.kpiStats('department'), store.kpiPlatforms('department').catch(() => [])]);
     const rows = rawRows.map(computeKpi).map((k) => ({ ...k, p: person(k.user_id) }));
@@ -1308,7 +1308,7 @@ async function renderTeamKpi() {
     const heroInfo = { title: isAdmin() ? 'Whole company' : deptName(state.me.department_id), sub: `Combined performance of ${rows.length} ${rows.length === 1 ? 'person' : 'people'} · average individual score ${avg ?? '—'}` };
     const th = (key, label) => `<th data-sort="${key}">${label}${s.key === key ? (s.dir < 0 ? ' ↓' : ' ↑') : ''}</th>`;
     $('#view .content').innerHTML = `
-      <div class="page-head"><div><h1>${title}</h1><p>${isAdmin() ? 'Combined performance of everyone, across all departments.' : `Combined performance of everyone in ${esc(deptName(state.me.department_id))}.`}</p></div></div>
+      <div class="page-head"><div><h1>${title}</h1><p>${isAdmin() ? 'Combined performance of everyone, across all departments.' : 'Combined performance of you and the team members you manage. Other managers and admins are not included.'}</p></div></div>
       ${kpiBody(team, null, heroInfo)}
       ${platformBreakdown(platRows)}
       <div class="card" style="margin-top:16px"><h2>Team members</h2>
@@ -1389,7 +1389,9 @@ async function renderPeople() {
   $('#invite-btn').addEventListener('click', openInvite);
   $$('[data-person]').forEach((r) => r.addEventListener('click', () => {
     const p = person(r.dataset.person);
-    if (isAdmin()) openPersonEditor(p); else location.hash = '#/kpi/' + encodeURIComponent(p.id);
+    if (isAdmin()) openPersonEditor(p);
+    else if (p.id === state.me.id || (p.role === 'member' && (p.manager_id === state.me.id || (!p.manager_id && state.me.department_id && p.department_id === state.me.department_id && (!state.me.team_id || p.team_id === state.me.team_id))))) location.hash = '#/kpi/' + encodeURIComponent(p.id);
+    else toast('Not available', 'Managers can see the performance of their own team members only. Only admins can see other managers.', 'gray', icon.lock);
   }));
   $$('[data-activate]').forEach((b) => b.addEventListener('click', () => {
     const inv = state.invitations.find((i) => i.email === b.dataset.activate);

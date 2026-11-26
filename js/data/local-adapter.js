@@ -553,10 +553,12 @@ export class LocalAdapter {
   async kpiPlatforms(scope, target = null) { return (await this.kpiStats(scope, target, { byPlatform: true })).flat(); }
   async kpiStats(scope, target = null, opts = {}) {
     const db = this.db; const me = this.me(db);
-    const mayView = (p) => p.id === me.id || me.role === 'admin' || (me.role === 'manager' && (p.department_id === me.department_id || p.manager_id === me.id));
+    // Mirrors can_view_kpi() in migrations/012_kpi_visibility.sql.
+    const mayView = (p) => p.id === me.id || me.role === 'admin' || (me.role === 'manager' && p.role === 'member' && (
+      p.manager_id === me.id || (!p.manager_id && me.department_id && p.department_id === me.department_id && (!me.team_id || p.team_id === me.team_id))));
     const people = db.profiles.filter((p) => p.active && (
       (scope === 'me' && p.id === me.id) ||
-      (scope === 'department' && (me.role === 'admin' || (me.role === 'manager' && (p.department_id === me.department_id || p.manager_id === me.id)))) ||
+      (scope === 'department' && ['admin', 'manager'].includes(me.role) && mayView(p)) ||
       (scope === 'user' && p.id === target && mayView(p))));
     const today = new Date().toISOString().slice(0, 10);
     const weekStart = (() => { const d = new Date(); const day = (d.getDay() + 6) % 7; d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - day); return d; })();
