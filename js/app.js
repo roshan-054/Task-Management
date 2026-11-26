@@ -221,8 +221,7 @@ function applyTheme(t) {
   try { t ? localStorage.setItem('taskflow-theme', t) : localStorage.removeItem('taskflow-theme'); } catch {}
 }
 try { const t = localStorage.getItem('taskflow-theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
-const isDark = () => document.documentElement.dataset.theme === 'dark' ||
-  (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+const isDark = () => document.documentElement.dataset.theme === 'dark';
 
 // =====================================================================
 //  Auth screens
@@ -416,6 +415,7 @@ function renderShell() {
     </aside>
     <div class="main">
       <header class="topbar">
+        <div class="top-brand"><img class="mark" src="icons/icon.svg" alt="" width="26" height="26"><span>${esc(CONFIG.APP_NAME)}</span></div>
         <div class="search">${icon.search(16)}<input id="search" placeholder="Search tasks" value="${esc(state.filter.q)}" aria-label="Search tasks"></div>
         <div class="grow"></div>
         <button class="icon-btn logout-btn only-sm" id="logout-top" aria-label="Log out" title="Log out">${icon.out(18)}</button>
@@ -856,6 +856,13 @@ function taskCard(t, i = 0) {
   </article>`;
 }
 
+// A to-do linked to a task: ticking it completes the task, and a completed task ticks its to-dos.
+async function completeLinkedTodos(taskId) {
+  const open = state.todos.filter((x) => x.task_id === taskId && !x.done);
+  for (const td of open) { try { Object.assign(td, await store.updateTodo(td.id, { done: true, ...('pending' in td ? { pending: false } : {}) })); } catch {} }
+  return open.length;
+}
+
 async function changeStatus(id, status) {
   const t = byId(state.tasks, id);
   if (!t || t.status === status) return;
@@ -864,6 +871,7 @@ async function changeStatus(id, status) {
   try {
     const updated = await store.updateTask(id, { status });
     Object.assign(t, updated);
+    if (status === 'completed') await completeLinkedTodos(id);
     if (status === 'completed') toast('Nice work', t.created_by !== state.me.id ? `${person(t.created_by).full_name} has been notified.` : 'Task completed.', 'green', icon.check);
   } catch (e) { t.status = prev; fail(e); }
   if (/^#\/(tasks|assigned|all|waiting)/.test(location.hash)) renderTaskView();
@@ -1075,7 +1083,7 @@ function openTaskEditor(t = null) {
         <div class="field"><label for="t-due">Due date</label><input class="input" type="date" id="t-due" value="${esc(data.due_date || '')}"></div>
       </div>
       <div class="row">
-        <div class="field"><label for="t-time">Time <span class="muted" style="font-weight:400">(optional)</span></label><input class="input" type="time" id="t-time" value="${esc(data.due_time || '')}"></div>
+        <div class="field"><label for="t-time">Time <span class="muted" style="font-weight:400">(optional)</span></label><input type="hidden" id="t-time" value="${esc(data.due_time || '')}"><div data-timepick></div></div>
         <div class="field"></div>
       </div>
       <div data-reminders></div>
@@ -1108,12 +1116,14 @@ function openTaskEditor(t = null) {
       $$('[data-plat]', box).forEach((b) => b.addEventListener('click', () => { chosenPlat = b.dataset.plat; renderPlat(); }));
     };
     renderPlat();
+    mountTimePicker($('[data-timepick]', ov), $('#t-time', ov));
     const rem = mountReminders($('[data-reminders]', ov), {
       task: t, getDue: () => ({ date: $('#t-due', ov).value || ($('#t-time', ov).value ? localToday() : ''), time: $('#t-time', ov).value }),
       needDue: () => {
         if (!$('#t-due', ov).value) $('#t-due', ov).value = localToday();
         if (!$('#t-time', ov).value) { const n = new Date(Date.now() + 60 * 60e3); $('#t-time', ov).value = `${String(n.getHours()).padStart(2, '0')}:00`; }
-        const ti = $('#t-time', ov); ti.classList.add('flash'); setTimeout(() => ti.classList.remove('flash'), 1400);
+        $('#t-time', ov).dispatchEvent(new Event('change'));
+        const ti = $('.tp-btn', ov); ti.classList.add('flash'); setTimeout(() => ti.classList.remove('flash'), 1400);
         toast('Due time set to ' + fmtTime($('#t-time', ov).value) + ' today', 'Change the date or time if needed; the reminder follows it.', 'blue', icon.clock);
       },
       assigneeId: () => (isManager() ? $('#t-assignee', ov).value : state.me.id) || null,
@@ -1158,6 +1168,7 @@ function openTaskEditor(t = null) {
         if (editing) {
           const u = await store.updateTask(t.id, payload);
           Object.assign(byId(state.tasks, t.id), u);
+          if (u.status === 'completed') await completeLinkedTodos(t.id);
           await rem.save(byId(state.tasks, t.id));
           toast('Task updated', '', 'blue', icon.check);
         } else {
@@ -1499,31 +1510,42 @@ const personalBlocked = () => state.personalError
 let todoTab = 'open';
 async function renderTodos() {
   try { state.todos = await store.listTodos(); state.personalError = ''; } catch (e) { state.personalError = e.message; }
+  // Tasks completed elsewhere (by you or the assignee) tick their linked to-dos.
+  for (const td of state.todos) {
+    const task = td.task_id && !td.done ? byId(state.tasks, td.task_id) : null;
+    if (task && task.status === 'completed') await completeLinkedTodos(task.id);
+  }
   const hasPending = state.todos.some((t) => 'pending' in t) || store.mode === 'demo';
   const open = state.todos.filter((t) => !t.done && !t.pending).sort((a, b) => a.position - b.position);
   const pending = state.todos.filter((t) => !t.done && t.pending).sort((a, b) => (b.pending_at || '').localeCompare(a.pending_at || ''));
   const done = state.todos.filter((t) => t.done).sort((a, b) => (b.done_at || '').localeCompare(a.done_at || ''));
   const lists = { open, pending, done };
   const linked = (t) => { const task = t.task_id ? byId(state.tasks, t.task_id) : null; return task ? `<button class="todo-task" data-open-task="${esc(task.id)}" title="Open the full task">${icon.arrow(12)} Task · ${esc(statusOf(task.status).label)}</button>` : ''; };
-  const item = (t) => `<li class="todo ${t.done ? 'is-done' : ''} ${t.pending ? 'is-pending' : ''}" data-todo="${esc(t.id)}" ${todoTab === 'open' ? 'draggable="true"' : ''}>
-      ${todoTab === 'open' ? `<span class="grip" aria-hidden="true">${icon.grip(16)}</span>` : ''}
-      <button class="todo-check" data-toggle aria-label="${t.done ? 'Mark as not done' : 'Mark as done'}" aria-pressed="${t.done}">${icon.check(14)}</button>
-      <span class="todo-main">
+  const ago = (iso) => timeAgo(iso).replace(/^Just now$/, 'just now');
+  const when = (t) => t.done && t.done_at ? `Done ${ago(t.done_at)}` : t.pending && t.pending_at ? `Pending ${ago(t.pending_at)}` : t.created_at ? `Added ${ago(t.created_at)}` : '';
+  const item = (t) => `<li class="todo tdc ${t.done ? 'is-done' : ''} ${t.pending ? 'is-pending' : ''}" data-todo="${esc(t.id)}" ${todoTab === 'open' ? 'draggable="true"' : ''}>
+      <div class="tdc-top">
+        <button class="todo-check" data-toggle aria-label="${t.done ? 'Mark as not done' : 'Mark as done'}" aria-pressed="${t.done}" title="${t.done ? 'Mark as not done' : 'Mark as done'}">${icon.check(14)}</button>
         <span class="todo-title" data-edit tabindex="0" title="Double-click to edit">${esc(t.title)}</span>
-        ${t.pending ? `<span class="todo-why" data-why tabindex="0" title="Click to edit the reason">${icon.clock(12)} ${t.pending_note ? esc(t.pending_note) : '<i>No reason given</i>'}${t.pending_at ? ` · since ${esc(timeAgo(t.pending_at))}` : ''}</span>` : ''}
-        ${linked(t)}
-      </span>
-      ${t.done && t.done_at ? `<span class="small muted">${esc(timeAgo(t.done_at))}</span>` : ''}
-      ${!t.done && hasPending ? (t.pending
-        ? `<button class="icon-btn todo-act" data-unpend aria-label="Move back to To-do" title="Move back to To-do">${icon.undo(15)}</button>`
-        : `<button class="icon-btn todo-act" data-pend aria-label="Move to Pending" title="Move to Pending">${icon.clock(15)}</button>`) : ''}
-      <button class="icon-btn todo-del" data-del aria-label="Delete" title="Delete">${icon.x(15)}</button>
+        ${todoTab === 'open' ? `<span class="grip" aria-hidden="true" title="Drag to reorder">${icon.grip(16)}</span>` : ''}
+      </div>
+      ${t.pending ? `<div class="todo-why" data-why tabindex="0" title="Click to edit the reason">${icon.clock(13)}<span>${t.pending_note ? esc(t.pending_note) : '<i>No reason given</i>'}</span></div>` : ''}
+      ${linked(t) ? `<div>${linked(t)}</div>` : ''}
+      <div class="tdc-foot">
+        <span class="small muted">${esc(when(t))}</span>
+        <span class="tdc-acts">
+          ${!t.done && hasPending ? (t.pending
+            ? `<button class="btn sm todo-act" data-unpend title="Move back to To-do">${icon.undo(14)} Resume</button>`
+            : `<button class="btn sm todo-act" data-pend title="Move to Pending with a reason">${icon.clock(14)} Pending</button>`) : ''}
+          <button class="icon-btn todo-del" data-del aria-label="Delete" title="Delete">${icon.trash(15)}</button>
+        </span>
+      </div>
     </li>`;
   const tab = (id, label, n) => `<button class="${todoTab === id ? 'active' : ''}" data-tab="${id}">${label}<span class="n">${n}</span></button>`;
   const cur = lists[todoTab];
-  const empties = { open: ['All clear', 'Nothing on your list. Add something above.'], pending: ['Nothing pending', 'Use the clock button on a to-do to park it here with a reason.'], done: ['Nothing completed yet', 'Ticked-off items show up here.'] };
+  const empties = { open: ['All clear', 'Nothing on your list. Add something above.'], pending: ['Nothing pending', 'Use the Pending button on a to-do to park it here with a reason.'], done: ['Nothing completed yet', 'Ticked-off items show up here.'] };
   $('#view').innerHTML = `
-  <section class="content narrow">
+  <section class="content">
     <div class="page-head"><div><h1>To-do</h1><p>Your private checklist for quick work. Only you can see it.</p></div></div>
     ${personalBlocked()}
     <form class="todo-add card" id="todo-add">
@@ -1531,13 +1553,11 @@ async function renderTodos() {
       <input class="todo-input" id="todo-input" maxlength="300" placeholder="Add a to-do and press Enter" autocomplete="off" aria-label="New to-do" ${state.personalError ? 'disabled' : ''}>
     </form>
     <div class="segmented todo-tabs">${tab('open', 'To-do', open.length)}${hasPending ? tab('pending', 'Pending', pending.length) : ''}${tab('done', 'Completed', done.length)}</div>
-    <div class="card todo-card">
-      ${cur.length ? `<ul class="todo-list" id="todo-${todoTab}">${cur.map(item).join('')}</ul>`
-        : `<div class="todo-empty">${todoTab === 'pending' ? icon.clock(28) : icon.check(28)}<b>${empties[todoTab][0]}</b><span>${empties[todoTab][1]}</span></div>`}
-    </div>
+    ${cur.length ? `<ul class="todo-grid" id="todo-${todoTab}">${cur.map(item).join('')}</ul>`
+      : `<div class="card todo-card"><div class="todo-empty">${todoTab === 'pending' ? icon.clock(28) : icon.check(28)}<b>${empties[todoTab][0]}</b><span>${empties[todoTab][1]}</span></div></div>`}
     ${todoTab === 'done' && done.length ? `<div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn ghost sm" id="todo-clear" type="button">Clear completed</button></div>` : ''}
     ${!hasPending && !state.personalError ? `<p class="small muted" style="margin-top:12px">To use the Pending tab, run supabase/migrations/010_todo_pending.sql in Supabase.</p>` : ''}
-    <p class="small muted" style="margin-top:12px">Tip: drag to reorder, double-click to edit, use the clock to move an item to Pending.</p>
+    <p class="small muted" style="margin-top:12px">Tip: drag cards to reorder, double-click a title to edit it. Ticking a to-do that came from a task also completes the task.</p>
   </section>`;
 
   const input = $('#todo-input');
@@ -1562,6 +1582,11 @@ async function renderTodos() {
       try {
         Object.assign(t, await store.updateTodo(id, { done: !t.done, ...(t.done ? {} : hasPending ? { pending: false } : {}) }));
         if (t.done) chime('green');
+        const task = t.done && t.task_id ? byId(state.tasks, t.task_id) : null;
+        if (task && task.status !== 'completed') {
+          if (canChangeStatus(task)) await changeStatus(task.id, 'completed');
+          else toast('To-do done', 'The task itself stays open: only the assignee or the person who created it can complete it.', 'orange', icon.lock);
+        }
         setTimeout(() => { renderTodos(); updateCounts(); }, t.done ? 260 : 0);
       } catch (ex) { li.classList.remove('ticking'); fail(ex); }
     });
@@ -1607,7 +1632,7 @@ async function renderTodos() {
     list.addEventListener('dragstart', (e) => { dragging = e.target.closest('[data-todo]'); if (!dragging) return; dragging.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragging.dataset.todo); });
     list.addEventListener('dragover', (e) => {
       if (!dragging) return; e.preventDefault();
-      const after = [...list.querySelectorAll('[data-todo]:not(.dragging)')].find((el) => e.clientY < el.getBoundingClientRect().top + el.offsetHeight / 2);
+      const after = [...list.querySelectorAll('[data-todo]:not(.dragging)')].find((el) => { const r = el.getBoundingClientRect(); return e.clientY < r.top || (e.clientY < r.bottom && e.clientX < r.left + r.width / 2); });
       if (after) list.insertBefore(dragging, after); else list.appendChild(dragging);
     });
     list.addEventListener('dragend', async () => {
@@ -1805,6 +1830,59 @@ function mountReminders(box, { task, getDue, live = false, assigneeId = null, ne
   return { redraw: draw, save };
 }
 
+// Friendly time picker: quick picks plus hour / minute / AM-PM buttons.
+// Writes "HH:MM" (24h) into the hidden input and fires "change".
+function mountTimePicker(box, input) {
+  let open = false;
+  const parse = () => { const m = /^(\d\d):(\d\d)$/.exec(input.value || ''); return m ? { h: +m[1], m: +m[2] } : null; };
+  const set = (h, m) => { input.value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`; input.dispatchEvent(new Event('change')); };
+  const QUICK = [[9, 0], [10, 0], [12, 0], [14, 0], [16, 0], [18, 0]];
+  let anim = false;
+  const draw = () => {
+    const v = parse();
+    const h12 = v ? (v.h % 12 || 12) : null, pm = v ? v.h >= 12 : (new Date().getHours() >= 12), min = v ? v.m : null;
+    box.innerHTML = `<div class="tp">
+      <button type="button" class="tp-btn ${v ? 'set' : ''}" aria-expanded="${open}" aria-haspopup="dialog">${icon.clock(16)}<span>${v ? esc(fmtTime(input.value)) : 'Add a time'}</span>${v ? `<span class="tp-x" data-tp-clear role="button" aria-label="Clear time" title="Clear time">${icon.x(13)}</span>` : ''}</button>
+      ${open ? `<div class="tp-pop ${anim ? 'anim' : ''}" role="dialog" aria-label="Pick a time" tabindex="-1">
+        <div class="tp-sec">Quick pick</div>
+        <div class="tp-quick">
+          <button type="button" data-in="30">In 30 min</button><button type="button" data-in="60">In 1 hour</button>
+          ${QUICK.map(([h, m]) => `<button type="button" data-q="${h}:${m}" class="${v && v.h === h && v.m === m ? 'on' : ''}">${esc(fmtTime(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`))}</button>`).join('')}
+        </div>
+        <div class="tp-cols">
+          <div><div class="tp-sec">Hour</div><div class="tp-grid">${[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((h) => `<button type="button" data-h="${h}" class="${h === h12 ? 'on' : ''}">${h}</button>`).join('')}</div></div>
+          <div><div class="tp-sec">Minute</div><div class="tp-grid">${[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((m) => `<button type="button" data-m="${m}" class="${m === min ? 'on' : ''}">:${String(m).padStart(2, '0')}</button>`).join('')}</div></div>
+          <div><div class="tp-sec">&nbsp;</div><div class="tp-ampm"><button type="button" data-ap="am" class="${v && !pm ? 'on' : ''}">AM</button><button type="button" data-ap="pm" class="${v && pm ? 'on' : ''}">PM</button></div></div>
+        </div>
+        <div class="tp-foot"><span class="small muted">${v ? 'Due at ' + esc(fmtTime(input.value)) : 'Pick an hour to start'}</span><button type="button" class="btn primary sm" data-tp-done>Done</button></div>
+      </div>` : ''}
+    </div>`;
+    const cur = () => parse() || { h: pm ? 12 : 9, m: 0 };
+    $('.tp-btn', box).addEventListener('click', (e) => {
+      if (e.target.closest('[data-tp-clear]')) { input.value = ''; input.dispatchEvent(new Event('change')); open = false; draw(); return; }
+      open = !open; anim = open; draw(); anim = false;
+    });
+    $$('[data-in]', box).forEach((b) => b.addEventListener('click', () => {
+      const d = new Date(Date.now() + Number(b.dataset.in) * 60e3);
+      let m = Math.ceil(d.getMinutes() / 5) * 5, h = d.getHours(); if (m === 60) { m = 0; h = (h + 1) % 24; }
+      set(h, m); open = false; draw();
+    }));
+    $$('[data-q]', box).forEach((b) => b.addEventListener('click', () => { const [h, m] = b.dataset.q.split(':').map(Number); set(h, m); open = false; draw(); }));
+    $$('[data-h]', box).forEach((b) => b.addEventListener('click', () => {
+      const c = cur(); const isPm = parse() ? c.h >= 12 : pm; const h = Number(b.dataset.h) % 12 + (isPm ? 12 : 0);
+      set(h, c.m); draw();
+    }));
+    $$('[data-m]', box).forEach((b) => b.addEventListener('click', () => { const c = cur(); set(c.h, Number(b.dataset.m)); draw(); }));
+    $$('[data-ap]', box).forEach((b) => b.addEventListener('click', () => { const c = cur(); const h = c.h % 12 + (b.dataset.ap === 'pm' ? 12 : 0); set(h, c.m); draw(); }));
+    $('[data-tp-done]', box)?.addEventListener('click', () => { open = false; draw(); $('.tp-btn', box).focus(); });
+    if (open && !box.contains(document.activeElement)) $('.tp-pop', box).focus({ preventScroll: true });
+  };
+  input.addEventListener('change', () => { if (!box.contains(document.activeElement) || !open) draw(); });
+  document.addEventListener('mousedown', (e) => { if (open && box.isConnected && !box.contains(e.target)) { open = false; draw(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && open && box.isConnected) { e.stopImmediatePropagation(); e.preventDefault(); open = false; draw(); $('.tp-btn', box).focus(); } }, true);
+  draw();
+}
+
 let reminderTimer = null;
 function startReminderLoop() {
   clearInterval(reminderTimer);
@@ -1879,7 +1957,7 @@ function openActivate(inv) {
 function friendlyAuthError(ex) {
   const m = ex?.message || String(ex);
   if (/Database error saving new user/i.test(m)) return 'This email has not been invited, or the invitation was already used.';
-  if (/rate limit/i.test(m)) return 'Supabase email limit reached. Try again in an hour, or turn off "Confirm email" in Supabase.';
+  if (/rate limit/i.test(m)) return 'Supabase email limit reached. Run supabase/migrations/011_admin_create_login.sql in Supabase once, then Activate works without sending any email.';
   return m;
 }
 

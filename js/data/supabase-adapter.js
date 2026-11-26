@@ -107,6 +107,11 @@ export class SupabaseAdapter {
   // temporary password. Uses a separate, non-persistent client so the
   // admin stays signed in. The database still checks the invitation.
   async activateMember(email, password, fullName) {
+    // Preferred: create the login inside the database (migration 011). No email is sent, so no email limit.
+    const { error } = await this.sb.rpc('admin_create_login', { p_email: email.trim().toLowerCase(), p_password: password, p_full_name: fullName || '' });
+    if (!error) return { needsConfirmation: false };
+    if (!/admin_create_login|schema cache|Could not find the function/i.test(error.message)) throw new Error(error.message);
+    // Database not updated yet: fall back to Supabase sign-up (sends a confirmation email).
     const tmp = createClient(this.url, this.key, { auth: { persistSession: false, autoRefreshToken: false, storageKey: 'taskflow-activate' } });
     const data = unwrap(await tmp.auth.signUp({
       email: email.trim().toLowerCase(), password,
