@@ -991,3 +991,27 @@ body { font-size: 14px; letter-spacing: 0; line-height: 1.43; }
 .tcard { border: 0; border-radius: 12px; box-shadow: var(--card-shadow); background: var(--surface); }
 .tcard:hover { transform: none; box-shadow: var(--card-shadow), 0 4px 10px rgba(26, 26, 26, .08); }
 .tp-pop:focus { outline: none; }
+
+/* ---- v14: interactive task-card edge, colored by state ---- */
+.tcard { --edge: #8a8a8a; --edge-soft: rgba(138, 138, 138, .18); transition: transform .22s var(--ease), box-shadow .22s, background .22s; }
+.tcard.st-in_progress { --edge: #2c6ecb; --edge-soft: rgba(44, 110, 203, .18); }
+.tcard.st-on_hold { --edge: #e8a400; --edge-soft: rgba(232, 164, 0, .2); }
+.tcard.st-completed { --edge: #29845a; --edge-soft: rgba(41, 132, 90, .18); }
+.tcard.is-soon { --edge: #f49342; --edge-soft: rgba(244, 147, 66, .22); }
+.tcard.is-overdue { --edge: #e22c38; --edge-soft: rgba(226, 44, 56, .2); }
+.tcard::before { width: 4px; background: var(--edge); transition: width .22s var(--ease), box-shadow .22s; border-radius: 12px 0 0 12px; }
+.tcard:hover, .tcard:focus-visible {
+  transform: translateY(-3px);
+  background: linear-gradient(90deg, var(--edge-soft), transparent 38%), var(--surface);
+  box-shadow: 0 0 0 1.5px var(--edge), 0 10px 24px -8px var(--edge-soft), 0 4px 12px rgba(0, 0, 0, .12);
+}
+.tcard:hover::before, .tcard:focus-visible::before { width: 7px; box-shadow: 0 0 14px 1px var(--edge); }
+.tcard:active { transform: translateY(-1px) scale(.995); }
+/* In progress: a light moves along the edge. Overdue: the edge pulses. */
+.tcard.st-in_progress:not(.is-overdue)::before { background: linear-gradient(180deg, var(--edge) 0%, #7fb2ff 50%, var(--edge) 100%); background-size: 100% 200%; animation: edge-flow 2.4s linear infinite; }
+.tcard.is-overdue::before { animation: edge-pulse 1.6s ease-in-out infinite; }
+@keyframes edge-flow { from { background-position: 0 0; } to { background-position: 0 200%; } }
+@keyframes edge-pulse { 50% { box-shadow: 0 0 12px 2px var(--edge); opacity: .75; } }
+.tcard.st-completed { opacity: .85; }
+.tcard.st-completed:hover { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .tcard::before { animation: none !important; } }

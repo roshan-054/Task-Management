@@ -829,9 +829,13 @@ function taskCard(t, i = 0) {
   const overdue = t.status !== 'completed' && t.due_date && t.due_date < todayISO();
   const locked = !canEditTask(t);
   const canStatus = canChangeStatus(t);
+  // The left edge shows the state at a glance: overdue, due soon, or the work status.
+  const tmr = new Date(Date.now() + 864e5); const tmrISO = `${tmr.getFullYear()}-${String(tmr.getMonth() + 1).padStart(2, '0')}-${String(tmr.getDate()).padStart(2, '0')}`;
+  const soon = !overdue && t.status !== 'completed' && t.due_date && t.due_date <= tmrISO;
+  const edgeLabel = overdue ? 'Overdue' : soon ? 'Due soon' : statusOf(t.status).label;
   const links = (t.links || []).map((l) => ({ ...l, href: safeUrl(l.url) })).filter((l) => l.href);
   return `
-  <article class="tcard ${t.status === 'completed' ? 'done' : ''}" data-id="${esc(t.id)}" style="--prio:${p.color};animation-delay:${Math.min(i, 12) * 30}ms" tabindex="0" ${canStatus ? 'draggable="true"' : ''}>
+  <article class="tcard ${t.status === 'completed' ? 'done' : ''} st-${esc(t.status)} ${overdue ? 'is-overdue' : soon ? 'is-soon' : ''}" data-id="${esc(t.id)}" data-edge="${esc(edgeLabel)}" style="--prio:${p.color};animation-delay:${Math.min(i, 12) * 30}ms" tabindex="0" ${canStatus ? 'draggable="true"' : ''}>
     <div class="tcard-top">
       <span class="pill tone-${p.tone}">${p.label}</span>
       ${platformChip(t)}
