@@ -38,7 +38,7 @@ const initials = (name) => (name || '?').split(/\s+/).filter(Boolean).slice(0, 2
 const AV_COLORS = ['#0a84ff', '#30b0c7', '#34c759', '#ff9500', '#ff2d55', '#af52de', '#5856d6', '#a2845e'];
 const avColor = (id) => AV_COLORS[[...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_COLORS.length];
 const avatar = (p, size = '') => `<div class="avatar ${size}" style="background:${avColor(p?.id || '')}" title="${esc(p?.full_name)}">${esc(initials(p?.full_name))}</div>`;
-const fmtDate = (d) => d ? new Date(d + (d.length === 10 ? 'T00:00:00' : '')).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: new Date(d).getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined }) : '';
+const fmtDate = (d) => d ? new Date(d + (d.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: new Date(d).getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined }) : '';
 const timeAgo = (iso) => {
   const s = (Date.now() - new Date(iso)) / 1000;
   if (s < 60) return 'Just now';
@@ -46,13 +46,19 @@ const timeAgo = (iso) => {
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
   return fmtDate(iso);
 };
-const fmtTime = (hhmm) => hhmm ? new Date(`2000-01-01T${hhmm}:00`).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
+// Times are always shown in India time (IST), 12-hour, e.g. "27 Nov 2026, 5:00 PM".
+const IST = 'Asia/Kolkata';
+const fmtTime = (hhmm) => { if (!hhmm) return ''; const [h, m] = String(hhmm).split(':').map(Number); return `${h % 12 || 12}:${String(m || 0).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+const istFmt = new Intl.DateTimeFormat('en-GB', { timeZone: IST, day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hourCycle: 'h23' });
+const istParts = (d) => Object.fromEntries(istFmt.formatToParts(new Date(d)).map((x) => [x.type, x.value]));
+// The IST wall-clock time as a local Date (for Excel cells).
+const istWall = (iso) => { const p = istParts(iso); return new Date(+p.year, ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].indexOf(p.month.slice(0, 3)), +p.day, +p.hour % 24, +p.minute); };
 // The moment a task is due: its date at its time (9:00 when no time is set).
 const localToday = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 10); };
 const localDay = (iso) => { const d = new Date(iso); return new Date(d - d.getTimezoneOffset() * 60e3).toISOString().slice(0, 10); };
 const dueMoment = (date, time) => date ? new Date(`${date}T${time || '09:00'}:00`) : null;
 const fmtDue = (t) => t.due_date ? fmtDate(t.due_date) + (t.due_time ? ', ' + fmtTime(t.due_time) : '') : '';
-const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+const fmtDateTime = (iso) => { if (!iso) return ''; const p = istParts(iso); return `${p.day} ${p.month.slice(0, 3)} ${p.year}, ${fmtTime(`${+p.hour % 24}:${p.minute}`)}`; };
 const ROLE_LABELS = { admin: 'Admin', manager: 'Manager', member: 'Team member' };
 const roleLabel = (r) => ROLE_LABELS[r] || r;
 const pct = (x) => `${Math.round((x || 0) * 100)}%`;
@@ -185,17 +191,21 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeSheet(); closePopover(); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && state.me) { e.preventDefault(); $('#search')?.focus(); }
 });
-// Small floating menu. items: [{ label, ic, tone, active, danger, onClick }]. On phones it opens as a bottom sheet.
-function openMenu(anchor, items, { title = '' } = {}) {
+// Small floating menu. items: [{ label, ic, tone, active, danger, onClick } | { group }]. On phones it opens as a bottom sheet.
+function openMenu(anchor, items, { title = '', search = false, minWidth = 0, compact = false } = {}) {
   closeMenu();
   const m = document.createElement('div');
-  m.className = 'fmenu'; m.setAttribute('role', 'menu');
-  m.innerHTML = `${title ? `<div class="fmenu-title">${esc(title)}</div>` : ''}${items.map((it, i) => `<button type="button" role="menuitemradio" aria-checked="${!!it.active}" class="fmenu-item ${it.tone ? 'tone-txt-' + it.tone : ''} ${it.active ? 'on' : ''} ${it.danger ? 'danger' : ''}" data-i="${i}">
-      <span class="fm-ic">${it.ic ? it.ic(17) : ''}</span><span class="fm-label">${esc(it.label)}${it.hint ? `<small>${esc(it.hint)}</small>` : ''}</span>${it.active ? `<span class="fm-tick">${icon.check(16)}</span>` : ''}</button>`).join('')}`;
+  m.className = `fmenu ${compact ? 'compact' : ''}`; m.setAttribute('role', 'menu');
+  m.innerHTML = `${title ? `<div class="fmenu-title">${esc(title)}</div>` : ''}
+    ${search ? `<div class="fmenu-search">${icon.search(15)}<input type="search" placeholder="Search" aria-label="Search options" autocomplete="off"></div>` : ''}
+    <div class="fmenu-list">${items.map((it, i) => it.group != null ? `<div class="fmenu-group">${esc(it.group)}</div>` : `<button type="button" role="menuitemradio" aria-checked="${!!it.active}" class="fmenu-item ${it.tone ? 'tone-txt-' + it.tone : ''} ${it.active ? 'on' : ''} ${it.danger ? 'danger' : ''} ${it.muted ? 'muted-item' : ''}" data-i="${i}" ${it.disabled ? 'disabled' : ''}>
+      ${it.ic !== false ? `<span class="fm-ic">${it.ic ? it.ic(17) : ''}</span>` : ''}<span class="fm-label">${esc(it.label)}${it.hint ? `<small>${esc(it.hint)}</small>` : ''}</span>${it.active ? `<span class="fm-tick">${icon.check(16)}</span>` : ''}</button>`).join('')}
+    <div class="fmenu-none hidden">No matches</div></div>`;
   const back = document.createElement('div'); back.className = 'fmenu-back';
   document.body.append(back, m);
   const phone = matchMedia('(max-width: 640px)').matches;
   if (!phone) {
+    if (minWidth) m.style.minWidth = Math.min(minWidth, innerWidth - 16) + 'px';
     const r = anchor.getBoundingClientRect(); const w = m.offsetWidth, h = m.offsetHeight;
     let left = Math.min(r.left, innerWidth - w - 8), top = r.bottom + 6;
     if (top + h > innerHeight - 8) top = Math.max(8, r.top - h - 6);
@@ -204,19 +214,85 @@ function openMenu(anchor, items, { title = '' } = {}) {
   const close = () => closeMenu();
   back.addEventListener('click', close);
   $$('.fmenu-item', m).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); const it = items[Number(b.dataset.i)]; close(); it.onClick?.(); }));
+  const q = $('.fmenu-search input', m);
+  q?.addEventListener('input', () => {
+    const t = q.value.trim().toLowerCase(); let any = false;
+    $$('.fmenu-item', m).forEach((b) => { const hit = !t || items[Number(b.dataset.i)].label.toLowerCase().includes(t); b.hidden = !hit; any ||= hit; });
+    $$('.fmenu-group', m).forEach((g) => { g.hidden = !!t; });
+    $('.fmenu-none', m).classList.toggle('hidden', any);
+  });
+  q?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $$('.fmenu-item', m).find((b) => !b.hidden && !b.disabled)?.click(); } });
   const onKey = (e) => {
-    const btns = $$('.fmenu-item', m); const i = btns.indexOf(document.activeElement);
-    if (e.key === 'Escape') { e.stopImmediatePropagation(); close(); anchor.focus?.(); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); btns[(i + 1) % btns.length].focus(); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); }
+    const btns = $$('.fmenu-item', m).filter((b) => !b.hidden && !b.disabled); const i = btns.indexOf(document.activeElement);
+    if (e.key === 'Escape') { e.stopImmediatePropagation(); e.preventDefault(); close(); anchor.focus?.(); }
+    else if (e.key === 'Tab') { close(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); btns[(i + 1) % btns.length]?.focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (i <= 0 && q) q.focus(); else btns[(i - 1 + btns.length) % btns.length]?.focus(); }
+    else if (e.key === 'Home' && document.activeElement !== q) { e.preventDefault(); btns[0]?.focus(); }
+    else if (e.key === 'End' && document.activeElement !== q) { e.preventDefault(); btns[btns.length - 1]?.focus(); }
+    else if (!q && e.key.length === 1 && /\S/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+      // type a letter to jump to the next option starting with it
+      clearTimeout(openMenu.tt); openMenu.typed = (openMenu.typed || '') + e.key.toLowerCase(); openMenu.tt = setTimeout(() => { openMenu.typed = ''; }, 700);
+      const k = openMenu.typed; const order = k.length > 1 ? [...btns.slice(Math.max(i, 0)), ...btns.slice(0, Math.max(i, 0))] : [...btns.slice(i + 1), ...btns.slice(0, i + 1)];
+      order.find((b) => b.textContent.trim().toLowerCase().startsWith(k))?.focus();
+    }
   };
   document.addEventListener('keydown', onKey, true);
   closeMenu.cleanup = () => { document.removeEventListener('keydown', onKey, true); m.remove(); back.remove(); };
-  ($('.fmenu-item.on', m) || $('.fmenu-item', m))?.focus({ preventScroll: true });
+  const first = $('.fmenu-item.on', m) || $('.fmenu-item:not([disabled])', m);
+  if (q && !phone) q.focus({ preventScroll: true }); else first?.focus({ preventScroll: true });
+  first?.scrollIntoView({ block: 'nearest' });
 }
+
+// ---------- Every <select class="select"> becomes a styled menu ----------
+// The real <select> stays in the page (hidden), so the code that reads .value
+// and listens for 'change' keeps working; the button just drives it.
+const SEL_VALUE = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+const SEL_INDEX = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex');
+const selLabel = (sel) => sel.getAttribute('aria-label') || (sel.id && document.querySelector(`label[for="${CSS.escape(sel.id)}"]`)?.textContent.trim()) || 'Choose';
+function enhanceSelect(sel) {
+  if (sel.dataset.enh || sel.multiple) return;
+  sel.dataset.enh = '1';
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.setAttribute('aria-haspopup', 'menu');
+  sel.after(btn);
+  sel.tabIndex = -1; sel.setAttribute('aria-hidden', 'true');
+  const sync = () => {
+    const o = sel.options[sel.selectedIndex];
+    btn.className = [...sel.classList].filter((c) => c !== 'xsel-native').join(' ') + ' xsel' + (!o || o.value === '' ? ' placeholder' : '');
+    if (!sel.classList.contains('xsel-native')) sel.classList.add('xsel-native');
+    btn.disabled = sel.disabled;
+    const html = `<span class="xsel-v">${esc(o?.textContent.trim() || '')}</span><span class="xsel-chev">${icon.chev(16)}</span>`; if (btn.innerHTML !== html) btn.innerHTML = html;
+    btn.setAttribute('aria-label', `${selLabel(sel)}: ${o?.textContent.trim() || 'none'}`);
+    if (sel.title) btn.title = sel.title;
+  };
+  Object.defineProperty(sel, 'value', { configurable: true, get() { return SEL_VALUE.get.call(this); }, set(v) { SEL_VALUE.set.call(this, v); sync(); } });
+  Object.defineProperty(sel, 'selectedIndex', { configurable: true, get() { return SEL_INDEX.get.call(this); }, set(v) { SEL_INDEX.set.call(this, v); sync(); } });
+  sel.addEventListener('change', sync);
+  new MutationObserver(sync).observe(sel, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['disabled', 'class', 'selected'] });
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const items = [];
+    const add = (o) => items.push({ label: o.textContent.trim(), active: o.selected, disabled: o.disabled, ic: false, muted: o.value === '',
+      onClick: () => { if (o.selected) return; SEL_VALUE.set.call(sel, o.value); sync(); sel.dispatchEvent(new Event('input', { bubbles: true })); sel.dispatchEvent(new Event('change', { bubbles: true })); btn.focus(); } });
+    [...sel.children].forEach((c) => { if (c.tagName === 'OPTGROUP') { items.push({ group: c.label }); [...c.children].forEach(add); } else if (!c.hidden) add(c); });
+    openMenu(btn, items, { title: matchMedia('(max-width: 640px)').matches ? selLabel(sel) : '', search: sel.options.length > 8, minWidth: btn.offsetWidth, compact: true });
+  });
+  btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); btn.click(); } });
+  sync();
+}
+const enhanceSelects = (root) => { if (root.matches?.('select.select')) enhanceSelect(root); root.querySelectorAll?.('select.select').forEach(enhanceSelect); };
+new MutationObserver((muts) => muts.forEach((mu) => mu.addedNodes.forEach((n) => { if (n.nodeType === 1) enhanceSelects(n); })))
+  .observe(document.body, { childList: true, subtree: true });
+// A <label for="..."> pointing at an enhanced select focuses its button.
+document.addEventListener('click', (e) => {
+  const l = e.target.closest('label[for]'); if (!l) return;
+  const sel = document.getElementById(l.htmlFor);
+  if (sel?.classList.contains('xsel-native')) { e.preventDefault(); sel.nextElementSibling?.focus(); }
+});
 function closeMenu() { closeMenu.cleanup?.(); closeMenu.cleanup = null; }
 window.addEventListener('resize', () => closeMenu());
-document.addEventListener('scroll', () => { if (!matchMedia('(max-width: 640px)').matches) closeMenu(); }, true);
+document.addEventListener('scroll', (e) => { if (!matchMedia('(max-width: 640px)').matches && !e.target.closest?.('.fmenu')) closeMenu(); }, true);
 
 // A proper "Are you sure?" dialog. Resolves true when confirmed.
 function confirmDialog({ title, body = '', confirm = 'Delete', tone = 'danger' } = {}) {
@@ -591,7 +667,7 @@ function renderNotificationsPage() {
   const canAsk = 'Notification' in window && Notification.permission === 'default';
   const muted = isMuted();
   const day = (iso) => { const d = new Date(iso); const t = new Date(); const y = new Date(); y.setDate(t.getDate() - 1);
-    return d.toDateString() === t.toDateString() ? 'Today' : d.toDateString() === y.toDateString() ? 'Yesterday' : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }); };
+    return d.toDateString() === t.toDateString() ? 'Today' : d.toDateString() === y.toDateString() ? 'Yesterday' : d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' }); };
   let lastDay = '';
   $('#view').innerHTML = `
   <section class="content narrow">
@@ -666,6 +742,7 @@ function route() {
   const h = location.hash || '#/tasks';
   $$('[data-nav]').forEach((b) => b.classList.toggle('active', h === b.dataset.nav || (h.startsWith('#/kpi/') && b.dataset.nav === '#/team-kpi')));
   $('#tab-more')?.classList.toggle('active', !MOBILE_MAIN.includes(h));
+  document.body.classList.toggle('has-inline-new', /^#\/(tasks|assigned|all|waiting|calendar)$/.test(h));
   closePopover(); closeMenu();
   if (/^#\/(tasks|assigned|all|waiting)$/.test(h)) {
     if ((h === '#/assigned' && !isManager()) || (h === '#/all' && !isAdmin())) { location.hash = '#/tasks'; return; }
@@ -770,7 +847,7 @@ function renderTaskView() {
 
   $('#view').innerHTML = `
   <section class="content wide">
-    <div class="page-head"><div><h1>${titles[h][0]}</h1><p>${titles[h][1]}</p></div>
+    <div class="page-head"><div><div class="title-row"><h1>${titles[h][0]}</h1><button class="btn primary new-task-inline" data-new-task>${icon.plus(16)}<span>New Task</span></button></div><p>${titles[h][1]}</p></div>
       <div class="segmented view-toggle" aria-label="Layout">
         <button class="${mode === 'board' ? 'active' : ''}" data-mode="board">${icon.board(15)} Board</button>
         <button class="${mode === 'cards' ? 'active' : ''}" data-mode="cards">${icon.grid(15)} Cards</button>
@@ -799,6 +876,7 @@ function renderTaskView() {
   </section>`;
 
   $$('[data-mode]').forEach((b) => b.addEventListener('click', () => { setViewMode(b.dataset.mode); renderTaskView(); }));
+  $('[data-new-task]')?.addEventListener('click', () => openTaskEditor());
   $('#t-export').addEventListener('click', (e) => openExportMenu(e.currentTarget, state.exportList));
   $$('[data-status]').forEach((b) => b.addEventListener('click', () => { f.status = b.dataset.status; renderTaskView(); }));
   $('#f-prio').addEventListener('change', (e) => { f.priority = e.target.value; renderTaskView(); });
@@ -920,7 +998,7 @@ function dueInfo(t) {
   else { state = 'ok'; label = `${days} days left`; }
   const hoursLeft = Math.max(0, Math.round((due - Date.now()) / 3600e3));
   return { state, pct: days < 0 ? 1 : pct, label,
-    tip: `Due ${new Date(t.due_date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${at ? ' at' + at : ''} · ${days < 0 ? `${-days} day${days === -1 ? '' : 's'} late` : `${hoursLeft} h left`} · ${Math.round(pct * 100)}% of the time used` };
+    tip: `Due ${new Date(t.due_date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}${at ? ' at' + at : ''} · ${days < 0 ? `${-days} day${days === -1 ? '' : 's'} late` : `${hoursLeft} h left`} · ${Math.round(pct * 100)}% of the time used` };
 }
 function dueChip(t) {
   const d = dueInfo(t);
@@ -973,9 +1051,13 @@ function taskCard(t, i = 0) {
     </div>
     <div class="tcard-foot">
       ${canStatus ? statusSelect(t) : `<span class="pill dot tone-${statusOf(t.status).tone}">${statusOf(t.status).label}</span>`}
-      ${nextReminder(t) ? `<span class="rem-count" title="Reminder ${esc(fmtDateTime(nextReminder(t).remind_at))}">${icon.bell(13)}</span>` : ''}
-      ${remarksFor(t.id).length ? `<span class="remark-count" title="Remarks">${icon.chat(13)} ${remarksFor(t.id).length}</span>` : ''}
-      ${t.completed_at ? `<span class="done-at" title="Completed ${esc(fmtDateTime(t.completed_at))}">${icon.check(14)} ${esc(fmtDateTime(t.completed_at))}</span>` : `<span class="small muted">Added ${esc(timeAgo(t.created_at))}</span>`}
+      <span class="foot-icons">
+        ${nextReminder(t) ? `<span class="rem-count" title="Reminder ${esc(fmtDateTime(nextReminder(t).remind_at))}">${icon.bell(13)}</span>` : ''}
+        ${remarksFor(t.id).length ? `<span class="remark-count" title="Remarks">${icon.chat(13)} ${remarksFor(t.id).length}</span>` : ''}
+      </span>
+    </div>
+    <div class="tcard-when ${t.completed_at && t.status === 'completed' ? 'is-done' : ''}">
+      ${t.completed_at && t.status === 'completed' ? `${icon.check(13)}<span>Completed ${esc(fmtDateTime(t.completed_at))}</span>` : `<span>Added ${esc(timeAgo(t.created_at))}</span>`}
     </div>
   </article>`;
 }
@@ -1199,6 +1281,9 @@ function openTaskEditor(t = null, prefill = {}) {
   openSheet(`${sheetHead(editing ? 'Edit task' : 'New task')}
     <form id="task-form" novalidate><div class="sheet-body">
       <div class="field"><label for="t-title">Title</label><input class="input" id="t-title" maxlength="200" placeholder="What needs to be done?" value="${esc(data.title)}" required></div>
+      <div class="field"><label id="t-status-l">Work status</label>
+        <div class="st-seg" role="radiogroup" aria-labelledby="t-status-l">${STATUSES.map((x) => `<button type="button" role="radio" aria-checked="${x.id === data.status}" class="st-opt tone-${x.tone} ${x.id === data.status ? 'on' : ''}" data-st="${x.id}">${statusIcon[x.id](16)}<span>${x.label}</span></button>`).join('')}</div>
+        <input type="hidden" id="t-status" value="${esc(data.status)}"></div>
       <div class="field"><label for="t-desc">Details</label><textarea class="textarea" id="t-desc" placeholder="Add context, steps or acceptance criteria">${esc(data.description)}</textarea></div>
       <div class="field"><label for="t-assignee">Assign to</label>
         <select class="select" id="t-assignee" ${isManager() ? '' : 'disabled'}>${assigneeOptions(data.assigned_to)}</select>
@@ -1218,7 +1303,6 @@ function openTaskEditor(t = null, prefill = {}) {
         </select>
         <span class="small muted" id="t-repeat-hint">${data.repeat ? 'When this is completed, the next one is created automatically with the next due date.' : 'For work that comes back, like a daily report.'}</span></div>
       <div data-reminders></div>
-      <div class="field"><label for="t-status">Work status</label><select class="select" id="t-status">${STATUSES.map((s) => `<option value="${s.id}" ${s.id === data.status ? 'selected' : ''}>${s.label}</option>`).join('')}</select></div>
       <div class="field"><label>Related links</label>
         <div id="links" style="display:grid;gap:8px">${(data.links || []).map(linkRow).join('')}</div>
         <button type="button" class="btn ghost sm" id="add-link" style="justify-self:start">${icon.plus(14)} Add link</button></div>
@@ -1247,6 +1331,14 @@ function openTaskEditor(t = null, prefill = {}) {
       $$('[data-plat]', box).forEach((b) => b.addEventListener('click', () => { chosenPlat = b.dataset.plat; renderPlat(); }));
     };
     renderPlat();
+    $$('.st-opt', ov).forEach((b) => b.addEventListener('click', () => {
+      $('#t-status', ov).value = b.dataset.st;
+      $$('.st-opt', ov).forEach((x) => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-checked', String(on)); });
+    }));
+    $('.st-seg', ov).addEventListener('keydown', (e) => {
+      if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(e.key)) return; e.preventDefault();
+      const bs = $$('.st-opt', ov); const i = bs.indexOf(document.activeElement); const n = bs[(i + (/Right|Down/.test(e.key) ? 1 : -1) + bs.length) % bs.length]; n.focus(); n.click();
+    });
     $('#t-repeat', ov).addEventListener('change', (e) => { $('#t-repeat-hint', ov).textContent = e.target.value ? 'When this is completed, the next one is created automatically with the next due date.' : 'For work that comes back, like a daily report.'; });
     mountTimePicker($('[data-timepick]', ov), $('#t-time', ov));
     const rem = mountReminders($('[data-reminders]', ov), {
@@ -1343,7 +1435,7 @@ function kpiBody(k, p, hero = null) {
     ['On hold', k.on_hold, 'var(--orange)'], ['Not started', k.not_started, 'var(--gray)'],
   ];
   const max = Math.max(1, ...k.weekly);
-  const weekLabel = (i) => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - 7 * (7 - i)); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+  const weekLabel = (i) => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - 7 * (7 - i)); return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); };
   return `
     <div class="card"><div class="profile-hero">
       ${hero ? `<div class="avatar lg team-av">${icon.team(34)}</div>` : avatar(p, 'lg')}
@@ -1719,7 +1811,6 @@ function drawTodos() {
       ${listsReady ? `<button class="tl-newcard" id="tl-new2">${icon.plus(20)}<span>Create new list</span></button>`
         : !state.personalError ? `<div class="tl-newcard muted small" style="cursor:default">To add more lists, run supabase/migrations/015_lists_and_repeat.sql in Supabase.</div>` : ''}
     </div>
-    <p class="small muted" style="margin-top:14px">Tick the box when done. Click a to-do to edit it, drag to reorder or move it to another list, and use the clock to park it in Pending with a reason. Ticking a to-do that came from a task also completes the task.</p>
   </section>`;
   bindTodos(hasPending);
 }
@@ -2129,7 +2220,7 @@ function exportScope() {
 
 function exportXlsx(ex) {
   const X = window.XLSX;
-  const day = (iso) => iso ? new Date(iso.length === 10 ? iso + 'T00:00:00' : iso) : '';
+  const day = (iso) => iso ? (iso.length === 10 ? new Date(iso + 'T00:00:00') : istWall(iso)) : '';
   const head = ['Task', 'Platform', 'Priority', 'Status', 'Assigned by', 'Assigned to', 'Created', 'Due', 'Completed', 'Latest remark'];
   const rows = ex.tasks.map((t) => {
     const r = latestRemark(t);
@@ -2139,16 +2230,15 @@ function exportXlsx(ex) {
   });
   const ws = X.utils.aoa_to_sheet([head, ...rows], { cellDates: true, dateNF: 'dd-mmm-yyyy' });
   // date columns: show as dates, and completed with the time
-  for (let i = 0; i < rows.length; i++) ['G', 'H', 'I'].forEach((c) => { const cell = ws[c + (i + 2)]; if (cell && cell.t === 'd') cell.z = c === 'I' ? 'dd-mmm-yyyy hh:mm' : 'dd-mmm-yyyy'; });
+  for (let i = 0; i < rows.length; i++) ['G', 'H', 'I'].forEach((c) => { const cell = ws[c + (i + 2)]; if (cell && cell.t === 'd') cell.z = c === 'I' ? 'dd-mmm-yyyy h:mm AM/PM' : 'dd-mmm-yyyy'; });
   ws['!cols'] = [48, 16, 10, 22, 20, 20, 13, 13, 18, 60].map((w) => ({ wch: w }));
   ws['!autofilter'] = { ref: `A1:J${rows.length + 1}` };
   const sm = exportSummary(ex.tasks);
   const info = X.utils.aoa_to_sheet([
     [`${CONFIG.APP_NAME} · Task report`], [],
-    ['List', ex.title], ['Due dates', exportRange(ex.tasks)], ['Team', exportScope()], ['Exported by', state.me.full_name], ['Exported on', new Date()], ['Filters', ex.filters.join(', ')], [],
+    ['List', ex.title], ['Due dates', exportRange(ex.tasks)], ['Team', exportScope()], ['Exported by', state.me.full_name], ['Exported on', fmtDateTime(new Date().toISOString()) + ' IST'], ['Filters', ex.filters.join(', ')], [],
     ['Total tasks', sm.total], ['Completed', sm.done], ['In progress', sm.prog], ['On hold', sm.hold], ['Overdue', sm.over],
   ], { cellDates: true });
-  if (info.B7) info.B7.z = 'dd-mmm-yyyy hh:mm';
   info['!cols'] = [{ wch: 16 }, { wch: 50 }];
   const wb = X.utils.book_new();
   X.utils.book_append_sheet(wb, ws, 'Tasks');
@@ -2174,7 +2264,7 @@ function exportPdf(ex) {
   doc.text(txt(`${CONFIG.APP_NAME} · Task report`), M, 46);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...muted);
   doc.text(txt(`${ex.title}  ·  Due ${exportRange(ex.tasks)}  ·  ${exportScope()}`), M, 64);
-  doc.text(txt(`Exported by ${state.me.full_name} on ${fmtDateTime(new Date().toISOString())}`), M, 78);
+  doc.text(txt(`Exported by ${state.me.full_name} on ${fmtDateTime(new Date().toISOString())} IST`), M, 78);
   // summary boxes
   const boxes = [['Total', sm.total, ink], ['Completed', sm.done, [12, 82, 48]], ['In progress', sm.prog, [0, 82, 163]], ['Overdue', sm.over, [142, 31, 11]]];
   const gap = 10, bw = (W - 2 * M - gap * 3) / 4, by = 94;
@@ -2264,8 +2354,8 @@ function renderCalendar() {
   Object.values(byDay).forEach((l) => l.sort(byDueTime));
   const scopes = [['all', isAdmin() ? 'Everyone' : 'All my tasks'], ['mine', 'Assigned to me'], ...(isManager() ? [['assigned', 'Assigned by me']] : [])];
   const head = phone
-    ? `${cal.week.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${addDays(cal.week, 6).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
-    : cal.month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    ? `${cal.week.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – ${addDays(cal.week, 6).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`
+    : cal.month.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
   // range shown, for the counters
   let from, to;
   if (phone) { from = cal.week; to = addDays(cal.week, 6); }
@@ -2283,7 +2373,7 @@ function renderCalendar() {
       ${days.map((d) => {
         const iso = isoOf(d), list = byDay[iso] || [], out = d.getMonth() !== cal.month.getMonth();
         return `<div class="cal-day ${out ? 'out' : ''} ${iso === todayIso ? 'today' : ''} ${iso < todayIso ? 'past' : ''} ${d.getDay() % 6 === 0 ? 'wkend' : ''}" data-day="${iso}" role="gridcell">
-          <div class="cal-num"><span>${d.getDate() === 1 ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : d.getDate()}</span>
+          <div class="cal-num"><span>${d.getDate() === 1 ? d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : d.getDate()}</span>
             <button type="button" class="cal-add" data-cal-add="${iso}" aria-label="New task on ${esc(fmtDate(iso))}" title="New task on this day">${icon.plus(14)}</button></div>
           <div class="cal-list">${list.slice(0, MAX).map((t) => calChip(t)).join('')}
             ${list.length > MAX ? `<button type="button" class="cal-more" data-cal-more="${iso}">+${list.length - MAX} more</button>` : ''}</div>
@@ -2294,8 +2384,8 @@ function renderCalendar() {
     body = `<div class="cal-agenda">${days.map((d) => {
       const iso = isoOf(d), list = byDay[iso] || [];
       return `<section class="ag-day ${iso === todayIso ? 'today' : ''} ${iso < todayIso ? 'past' : ''}" data-day="${iso}">
-        <header><b>${d.toLocaleDateString(undefined, { weekday: 'short' })}</b><span class="ag-num">${d.getDate()}</span>
-          <span class="muted small">${iso === todayIso ? 'Today' : d.toLocaleDateString(undefined, { month: 'short' })}</span>
+        <header><b>${d.toLocaleDateString('en-IN', { weekday: 'short' })}</b><span class="ag-num">${d.getDate()}</span>
+          <span class="muted small">${iso === todayIso ? 'Today' : d.toLocaleDateString('en-IN', { month: 'short' })}</span>
           <button type="button" class="cal-add" data-cal-add="${iso}" aria-label="New task on ${esc(fmtDate(iso))}">${icon.plus(16)}</button></header>
         ${list.length ? `<div class="ag-list">${list.map((t) => calChip(t, { full: true })).join('')}</div>` : `<p class="ag-empty">Nothing due</p>`}
       </section>`;
@@ -2304,7 +2394,7 @@ function renderCalendar() {
 
   $('#view').innerHTML = `
   <section class="content cal-page">
-    <div class="page-head"><div><h1>Calendar</h1><p>${phone ? 'Your week at a glance. Tap a task to open it.' : 'Tasks on their due dates. Drag a task to another day to move its due date.'}</p></div></div>
+    <div class="page-head"><div><div class="title-row"><h1>Calendar</h1><button class="btn primary new-task-inline" data-new-task>${icon.plus(16)}<span>New Task</span></button></div><p>${phone ? 'Your week at a glance. Tap a task to open it.' : 'Tasks on their due dates. Drag a task to another day to move its due date.'}</p></div></div>
     <div class="cal-bar">
       <div class="cal-nav">
         <button class="icon-btn" id="cal-prev" aria-label="${phone ? 'Previous week' : 'Previous month'}">${icon.chev(18)}</button>
@@ -2326,6 +2416,7 @@ function renderCalendar() {
 function bindCalendar(phone, byDay) {
   const v = $('#view');
   const move = (n) => { if (phone) cal.week = addDays(cal.week, 7 * n); else cal.month = new Date(cal.month.getFullYear(), cal.month.getMonth() + n, 1); renderCalendar(); };
+  $('[data-new-task]')?.addEventListener('click', () => openTaskEditor());
   $('#cal-prev').addEventListener('click', () => move(-1));
   $('#cal-next').addEventListener('click', () => move(1));
   $('#cal-today').addEventListener('click', () => { const t = new Date(); cal.month = new Date(t.getFullYear(), t.getMonth(), 1); cal.week = mondayOf(t); renderCalendar(); });
@@ -2342,7 +2433,7 @@ function bindCalendar(phone, byDay) {
       const iso = more.dataset.calMore;
       openMenu(more, (byDay[iso] || []).map((t) => ({ label: t.title, hint: `${CAL_LABEL[calState(t)]}${t.due_time ? ' · ' + fmtTime(t.due_time) : ''} · ${person(t.assigned_to).full_name}`,
         ic: calState(t) === 'done' ? icon.check : icon.circle, tone: { overdue: 'red', today: 'orange', upcoming: 'blue', done: 'green' }[calState(t)], onClick: () => openTask(byId(state.tasks, t.id)) })),
-        { title: dayOf(iso).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) });
+        { title: dayOf(iso).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }) });
       return;
     }
     const add = e.target.closest('[data-cal-add]');
