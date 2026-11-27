@@ -97,6 +97,14 @@ const icon = {
   pause: (s) => I('<circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/>', s),
   play: (s) => I('<circle cx="12" cy="12" r="9"/><path d="M10 8.5l5 3.5-5 3.5z"/>', s),
   circle: (s) => I('<circle cx="12" cy="12" r="9"/>', s),
+  repeat: (s) => I('<path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 014-4h12M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 01-4 4H4"/>', s),
+  dots: (s) => I('<circle cx="12" cy="5.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="18.5" r="1.3"/>', s),
+  chev: (s) => I('<path d="M6 9l6 6 6-6"/>', s),
+  report: (s) => I('<path d="M6 3.5h9l4 4v13H6z"/><path d="M9 17v-3M12 17v-6M15 17v-4"/>', s),
+  copy: (s) => I('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/>', s),
+  mail: (s) => I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 6.5L12 13l8.5-6.5"/>', s),
+  download: (s) => I('<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>', s),
+  print: (s) => I('<path d="M7 9V4h10v5"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M7 14h10v6H7z"/>', s),
   arrow: (s) => I('<path d="M7 17L17 7M9 7h8v8"/>', s),
   info: (s) => I('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>', s),
   user: (s) => I('<circle cx="12" cy="9" r="3.5"/><path d="M5.5 19.5c1-3 3.5-4.5 6.5-4.5s5.5 1.5 6.5 4.5"/><circle cx="12" cy="12" r="10"/>', s),
@@ -140,12 +148,13 @@ const canEditTask = (t) => t.created_by === state.me.id || isAdmin();
 // =====================================================================
 //  Toasts & dialogs
 // =====================================================================
-function toast(title, body = '', tone = 'blue', ic = icon.info) {
+function toast(title, body = '', tone = 'blue', ic = icon.info, { action = '', onAction = null } = {}) {
   const el = document.createElement('div');
   el.className = 'toast';
-  el.innerHTML = `<div class="ic tone-${tone}">${ic(18)}</div><div><b>${esc(title)}</b>${body ? `<span class="muted small">${esc(body)}</span>` : ''}</div>`;
+  el.innerHTML = `<div class="ic tone-${tone}">${ic(18)}</div><div style="flex:1"><b>${esc(title)}</b>${body ? `<span class="muted small">${esc(body)}</span>` : ''}</div>${action ? `<button class="btn sm toast-act">${esc(action)}</button>` : ''}`;
   $('#toasts').appendChild(el);
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, 4200);
+  el.querySelector('.toast-act')?.addEventListener('click', () => { el.remove(); onAction?.(); });
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, action ? 6500 : 4200);
 }
 const fail = (e) => {
   const m = e?.message || String(e);
@@ -176,6 +185,39 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeSheet(); closePopover(); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && state.me) { e.preventDefault(); $('#search')?.focus(); }
 });
+// Small floating menu. items: [{ label, ic, tone, active, danger, onClick }]. On phones it opens as a bottom sheet.
+function openMenu(anchor, items, { title = '' } = {}) {
+  closeMenu();
+  const m = document.createElement('div');
+  m.className = 'fmenu'; m.setAttribute('role', 'menu');
+  m.innerHTML = `${title ? `<div class="fmenu-title">${esc(title)}</div>` : ''}${items.map((it, i) => `<button type="button" role="menuitemradio" aria-checked="${!!it.active}" class="fmenu-item ${it.tone ? 'tone-txt-' + it.tone : ''} ${it.active ? 'on' : ''} ${it.danger ? 'danger' : ''}" data-i="${i}">
+      <span class="fm-ic">${it.ic ? it.ic(17) : ''}</span><span class="fm-label">${esc(it.label)}${it.hint ? `<small>${esc(it.hint)}</small>` : ''}</span>${it.active ? `<span class="fm-tick">${icon.check(16)}</span>` : ''}</button>`).join('')}`;
+  const back = document.createElement('div'); back.className = 'fmenu-back';
+  document.body.append(back, m);
+  const phone = matchMedia('(max-width: 640px)').matches;
+  if (!phone) {
+    const r = anchor.getBoundingClientRect(); const w = m.offsetWidth, h = m.offsetHeight;
+    let left = Math.min(r.left, innerWidth - w - 8), top = r.bottom + 6;
+    if (top + h > innerHeight - 8) top = Math.max(8, r.top - h - 6);
+    m.style.left = Math.max(8, left) + 'px'; m.style.top = top + 'px';
+  } else m.classList.add('sheet-mode');
+  const close = () => closeMenu();
+  back.addEventListener('click', close);
+  $$('.fmenu-item', m).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); const it = items[Number(b.dataset.i)]; close(); it.onClick?.(); }));
+  const onKey = (e) => {
+    const btns = $$('.fmenu-item', m); const i = btns.indexOf(document.activeElement);
+    if (e.key === 'Escape') { e.stopImmediatePropagation(); close(); anchor.focus?.(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); btns[(i + 1) % btns.length].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length].focus(); }
+  };
+  document.addEventListener('keydown', onKey, true);
+  closeMenu.cleanup = () => { document.removeEventListener('keydown', onKey, true); m.remove(); back.remove(); };
+  ($('.fmenu-item.on', m) || $('.fmenu-item', m))?.focus({ preventScroll: true });
+}
+function closeMenu() { closeMenu.cleanup?.(); closeMenu.cleanup = null; }
+window.addEventListener('resize', () => closeMenu());
+document.addEventListener('scroll', () => { if (!matchMedia('(max-width: 640px)').matches) closeMenu(); }, true);
+
 // A proper "Are you sure?" dialog. Resolves true when confirmed.
 function confirmDialog({ title, body = '', confirm = 'Delete', tone = 'danger' } = {}) {
   return new Promise((resolve) => {
@@ -420,6 +462,7 @@ function navItems() {
     { hash: '#/notifications', label: 'Notifications', ic: icon.bell, count: () => state.notifications.filter((n) => !n.read).length, alert: true },
     { hash: '#/tasks', label: 'My Tasks', ic: icon.check, count: () => myTasks().filter((t) => t.status !== 'completed').length },
     { hash: '#/waiting', label: 'Waiting on Me', ic: icon.at, count: () => waitingOnMe().length },
+    { hash: '#/calendar', label: 'Calendar', ic: icon.cal },
   ];
   const personal = [{ section: 'Personal' },
     { hash: '#/todo', label: 'To-do', ic: icon.list, count: () => state.todos.filter((t) => !t.done && !t.pending).length },
@@ -430,6 +473,7 @@ function navItems() {
   items.push({ section: 'Performance' });
   if (isManager()) items.push({ hash: '#/team-kpi', label: 'Team Performance', ic: icon.chart });
   else items.push({ hash: '#/kpi', label: 'My Performance', ic: icon.chart });
+  items.push({ hash: '#/reports', label: 'Reports', ic: icon.report });
   if (isManager()) { items.push({ section: 'Organisation' }); items.push({ hash: '#/people', label: 'People & Teams', ic: icon.team }); items.push({ hash: '#/platforms', label: 'Platforms', ic: icon.tag }); }
   return items;
 }
@@ -439,6 +483,8 @@ const waitingOnMe = () => state.tasks.filter((t) => t.status !== 'completed' && 
 const myTasks = () => state.tasks.filter((t) => t.assigned_to === state.me.id);
 const assignedByMe = () => state.tasks.filter((t) => t.created_by === state.me.id && t.assigned_to !== state.me.id);
 
+const MOBILE_MAIN = ['#/tasks', '#/todo', '#/calendar', '#/notifications'];
+const shortLabel = (l) => l.replace('Assigned by Me', 'Assigned').replace('My Performance', 'KPI').replace('Team Performance', 'KPI').replace('People & Teams', 'People').replace('Waiting on Me', 'Waiting').replace('Notifications', 'Alerts');
 function renderShell() {
   const me = state.me;
   const items = navItems();
@@ -469,11 +515,18 @@ function renderShell() {
       <div id="view"></div>
     </div>
     <nav class="mobile-tabs">
-      ${items.filter((it) => !it.section).slice(0, 5).map((it) => `<button data-nav="${it.hash}">${it.ic(22)}<span>${esc(it.label.replace('Assigned by Me', 'Assigned').replace('My Performance', 'KPI').replace('Team Performance', 'KPI').replace('People & Teams', 'People').replace('Waiting on Me', 'Waiting'))}</span></button>`).join('')}
+      ${MOBILE_MAIN.map((h) => items.find((it) => it.hash === h)).filter(Boolean).map((it) => `<button data-nav="${it.hash}">${it.ic(22)}<span>${esc(shortLabel(it.label))}</span></button>`).join('')}
+      <button id="tab-more" aria-haspopup="menu">${icon.dots(22)}<span>More</span></button>
     </nav>
   </div>`;
 
   $$('[data-nav]').forEach((b) => b.addEventListener('click', () => { location.hash = b.dataset.nav; }));
+  $('#tab-more').addEventListener('click', (e) => {
+    const rest = navItems().filter((it) => !it.section && !MOBILE_MAIN.includes(it.hash));
+    const h = location.hash || '#/tasks';
+    openMenu(e.currentTarget, rest.map((it) => ({ label: it.label, ic: it.ic, active: h === it.hash || (h.startsWith('#/kpi/') && it.hash === '#/team-kpi'),
+      hint: it.count && it.count() ? `${it.count()} open` : '', onClick: () => { location.hash = it.hash; } })), { title: 'More' });
+  });
   $('#new-task').addEventListener('click', () => openTaskEditor());
   $('#bell').addEventListener('click', (e) => { e.stopPropagation(); togglePopover(); });
   $('#sound-btn').addEventListener('click', (e) => {
@@ -612,7 +665,8 @@ function route() {
   if (!state.me) return;
   const h = location.hash || '#/tasks';
   $$('[data-nav]').forEach((b) => b.classList.toggle('active', h === b.dataset.nav || (h.startsWith('#/kpi/') && b.dataset.nav === '#/team-kpi')));
-  closePopover();
+  $('#tab-more')?.classList.toggle('active', !MOBILE_MAIN.includes(h));
+  closePopover(); closeMenu();
   if (/^#\/(tasks|assigned|all|waiting)$/.test(h)) {
     if ((h === '#/assigned' && !isManager()) || (h === '#/all' && !isAdmin())) { location.hash = '#/tasks'; return; }
     renderTaskView();
@@ -620,6 +674,8 @@ function route() {
   else if (h.startsWith('#/kpi/')) renderKpi(decodeURIComponent(h.slice(6)));
   else if (h === '#/team-kpi' && isManager()) renderTeamKpi();
   else if (h === '#/todo') renderTodos();
+  else if (h === '#/reports') renderReports();
+  else if (h === '#/calendar') renderCalendar();
   else if (h === '#/notifications') renderNotificationsPage();
   else if (h === '#/notes') renderNotes();
   else if (h === '#/people' && isManager()) renderPeople();
@@ -677,6 +733,13 @@ function renderTaskView() {
   };
   pool = [...pool].sort(sorter);
   const list = pool.filter((t) => f.status === 'all' || (f.status === 'active' ? t.status !== 'completed' : t.status === f.status));
+  const segLabel = { active: 'Active', all: 'All statuses', ...Object.fromEntries(STATUSES.map((x) => [x.id, x.label])) };
+  state.exportList = { tasks: mode === 'board' ? pool : list, title: titles[h][0], filters: [
+    mode === 'board' ? 'All statuses' : segLabel[f.status],
+    f.priority !== 'all' ? prioOf(f.priority).label + ' priority' : '',
+    f.platform === 'none' ? 'No platform' : f.platform !== 'all' ? 'Platform: ' + (platformOf(f.platform)?.name || '') : '',
+    q ? `Search: "${f.q.trim()}"` : '',
+    { due: 'Sorted by due date', priority: 'Sorted by priority', recent: 'Newest first' }[f.sort] || ''].filter(Boolean) };
 
   const segs = [['active', 'Active'], ...STATUSES.map((s) => [s.id, s.label]), ['all', 'All']];
   const board = `<div class="board">${STATUSES.map((s) => {
@@ -712,7 +775,8 @@ function renderTaskView() {
         <button class="${mode === 'board' ? 'active' : ''}" data-mode="board">${icon.board(15)} Board</button>
         <button class="${mode === 'cards' ? 'active' : ''}" data-mode="cards">${icon.grid(15)} Cards</button>
         <button class="${mode === 'people' ? 'active' : ''}" data-mode="people">${icon.people(15)} People</button>
-      </div></div>
+      </div>
+      <button class="btn" id="t-export" aria-haspopup="menu" ${list.length || pool.length ? '' : 'disabled'}>${icon.download(15)}<span>Export</span></button></div>
     <div class="toolbar">
       ${mode !== 'board' ? `<div class="segmented" role="tablist">${segs.map(([id, label]) => `<button class="${f.status === id ? 'active' : ''}" data-status="${id}">${label}<span class="n">${counts[id]}</span></button>`).join('')}</div>` : ''}
       <select class="select ${f.priority !== 'all' ? 'is-set' : ''}" id="f-prio" aria-label="Priority filter">
@@ -735,6 +799,7 @@ function renderTaskView() {
   </section>`;
 
   $$('[data-mode]').forEach((b) => b.addEventListener('click', () => { setViewMode(b.dataset.mode); renderTaskView(); }));
+  $('#t-export').addEventListener('click', (e) => openExportMenu(e.currentTarget, state.exportList));
   $$('[data-status]').forEach((b) => b.addEventListener('click', () => { f.status = b.dataset.status; renderTaskView(); }));
   $('#f-prio').addEventListener('change', (e) => { f.priority = e.target.value; renderTaskView(); });
   $('#f-sort').addEventListener('change', (e) => { f.sort = e.target.value; renderTaskView(); });
@@ -761,7 +826,6 @@ function renderTaskView() {
       changeStatus(id, col.dataset.col);
     });
   });
-  $$('.status-select').forEach((sel) => sel.addEventListener('change', (e) => changeStatus(sel.dataset.id, e.target.value)));
   $$('[data-card-del]').forEach((b) => {
     b.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -800,11 +864,24 @@ function emptyState(h) {
     <button class="btn primary" id="empty-new" style="margin-top:10px">${icon.plus(16)} New Task</button></div>`;
 }
 
+const REPEATS = { daily: 'Every day', weekdays: 'Every weekday (Mon–Fri)', weekly: 'Every week', monthly: 'Every month' };
+const REPEAT_SHORT = { daily: 'Daily', weekdays: 'Weekdays', weekly: 'Weekly', monthly: 'Monthly' };
+const repeatReady = () => store.mode === 'demo' || state.tasks.some((t) => 'repeat' in t);
+const STATUS_HINT = { not_started: 'Not picked up yet', in_progress: 'Being worked on', on_hold: 'Paused or blocked', completed: 'Done' };
 function statusSelect(t) {
   const s = statusOf(t.status);
-  return `<select class="status-select tone-${s.tone}" data-id="${esc(t.id)}" aria-label="Work status">
-    ${STATUSES.map((x) => `<option value="${x.id}" ${x.id === t.status ? 'selected' : ''}>${x.label}</option>`).join('')}</select>`;
+  return `<button type="button" class="st-pick tone-${s.tone}" data-status-btn="${esc(t.id)}" aria-haspopup="menu" aria-label="Work status: ${esc(s.label)}. Change">
+    <span class="st-ic">${statusIcon[s.id](15)}</span><span>${esc(s.label)}</span>${icon.chev(14)}</button>`;
 }
+function openStatusMenu(btn) {
+  const t = byId(state.tasks, btn.dataset.statusBtn); if (!t) return;
+  openMenu(btn, STATUSES.map((x) => ({ label: x.label, hint: STATUS_HINT[x.id], ic: statusIcon[x.id], tone: x.tone, active: x.id === t.status,
+    onClick: () => changeStatus(t.id, x.id) })), { title: 'Work status' });
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-status-btn]');
+  if (b) { e.stopPropagation(); openStatusMenu(b); }
+});
 
 const REASONS = { issue: 'Issue', delay: 'Delay by someone', dependency: 'Depends on someone', other: 'Other' };
 function blockerBanner(t) {
@@ -882,6 +959,7 @@ function taskCard(t, i = 0) {
       <span class="pill tone-${p.tone}">${p.label}</span>
       ${platformChip(t)}
       ${dueChip(t)}
+      ${t.repeat && REPEATS[t.repeat] ? `<span class="rep-chip" title="Repeats ${esc(REPEATS[t.repeat].toLowerCase())}">${icon.repeat(12)}${esc(REPEAT_SHORT[t.repeat])}</span>` : ''}
       ${locked ? `<span class="lock" title="Assigned by someone else. You can update the status only.">${icon.lock(13)}</span>` : ''}
       ${canEditTask(t) ? `<button type="button" class="card-del" data-card-del="${esc(t.id)}" aria-label="Delete task" title="Delete task">${icon.trash(14)}</button>` : ''}
     </div>
@@ -918,9 +996,11 @@ async function changeStatus(id, status) {
     const updated = await store.updateTask(id, { status });
     Object.assign(t, updated);
     if (status === 'completed') await completeLinkedTodos(id);
+    if (status === 'completed' && t.repeat) { try { state.tasks = await store.listTasks(); } catch {} toast('Next one created', `"${t.title}" repeats ${REPEATS[t.repeat].toLowerCase()}.`, 'blue', icon.repeat); }
     if (status === 'completed') toast('Nice work', t.created_by !== state.me.id ? `${person(t.created_by).full_name} has been notified.` : 'Task completed.', 'green', icon.check);
   } catch (e) { t.status = prev; fail(e); }
   if (/^#\/(tasks|assigned|all|waiting)/.test(location.hash)) renderTaskView();
+  else if (location.hash === '#/calendar') renderCalendar();
   updateCounts();
 }
 
@@ -1113,9 +1193,9 @@ function linkRow(l = { label: '', url: '' }) {
     <button type="button" class="icon-btn" data-rm aria-label="Remove link">${icon.x(16)}</button></div>`;
 }
 
-function openTaskEditor(t = null) {
+function openTaskEditor(t = null, prefill = {}) {
   const editing = !!t;
-  const data = t || { title: '', description: '', priority: 'medium', status: 'not_started', due_date: '', links: [], platform_id: null, assigned_to: isManager() ? '' : state.me.id };
+  const data = t || { title: '', description: '', priority: 'medium', status: 'not_started', due_date: '', links: [], platform_id: null, assigned_to: isManager() ? '' : state.me.id, ...prefill };
   openSheet(`${sheetHead(editing ? 'Edit task' : 'New task')}
     <form id="task-form" novalidate><div class="sheet-body">
       <div class="field"><label for="t-title">Title</label><input class="input" id="t-title" maxlength="200" placeholder="What needs to be done?" value="${esc(data.title)}" required></div>
@@ -1132,6 +1212,11 @@ function openTaskEditor(t = null) {
         <div class="field"><label for="t-time">Time <span class="muted" style="font-weight:400">(optional)</span></label><input type="hidden" id="t-time" value="${esc(data.due_time || '')}"><div data-timepick></div></div>
         <div class="field"></div>
       </div>
+      <div class="field"><label for="t-repeat">${icon.repeat(14)} Repeat</label>
+        <select class="select" id="t-repeat" ${editing && t.created_by !== state.me.id && !isAdmin() ? 'disabled' : ''}>
+          <option value="">Doesn't repeat</option>${Object.entries(REPEATS).map(([k, v]) => `<option value="${k}" ${data.repeat === k ? 'selected' : ''}>${v}</option>`).join('')}
+        </select>
+        <span class="small muted" id="t-repeat-hint">${data.repeat ? 'When this is completed, the next one is created automatically with the next due date.' : 'For work that comes back, like a daily report.'}</span></div>
       <div data-reminders></div>
       <div class="field"><label for="t-status">Work status</label><select class="select" id="t-status">${STATUSES.map((s) => `<option value="${s.id}" ${s.id === data.status ? 'selected' : ''}>${s.label}</option>`).join('')}</select></div>
       <div class="field"><label>Related links</label>
@@ -1162,6 +1247,7 @@ function openTaskEditor(t = null) {
       $$('[data-plat]', box).forEach((b) => b.addEventListener('click', () => { chosenPlat = b.dataset.plat; renderPlat(); }));
     };
     renderPlat();
+    $('#t-repeat', ov).addEventListener('change', (e) => { $('#t-repeat-hint', ov).textContent = e.target.value ? 'When this is completed, the next one is created automatically with the next due date.' : 'For work that comes back, like a daily report.'; });
     mountTimePicker($('[data-timepick]', ov), $('#t-time', ov));
     const rem = mountReminders($('[data-reminders]', ov), {
       task: t, getDue: () => ({ date: $('#t-due', ov).value || ($('#t-time', ov).value ? localToday() : ''), time: $('#t-time', ov).value }),
@@ -1206,6 +1292,9 @@ function openTaskEditor(t = null) {
       // Only send platform_id when platforms exist, so databases without migration 006 keep working.
       if (state.platforms.length || data.platform_id) payload.platform_id = chosenPlat || null;
       if (!state.remindersReady && !payload.due_time) delete payload.due_time;  // database not updated yet
+      const rp = $('#t-repeat', ov).value || null;
+      if (repeatReady() || rp) payload.repeat = rp;
+      if (rp && !payload.due_date) payload.due_date = localToday();
       if (!payload.title) { err.textContent = 'Give the task a title.'; return; }
       if (!payload.assigned_to) { err.textContent = 'Choose who this task is for.'; $('#t-assignee', ov).focus(); return; }
       if (bad) { err.textContent = `"${bad.url}" is not a valid link.`; return; }
@@ -1555,83 +1644,140 @@ function renderPlatforms() {
 const personalBlocked = () => state.personalError
   ? `<div class="notice">${icon.info(18)}<div>${esc(state.personalError)}</div></div>` : '';
 
-let todoTab = 'open';
+// To-do: several lists shown as cards side by side (like Google Tasks). Each list has
+// "Add a task", square checkboxes, a Pending section (with the reason) and a folded
+// Completed section. The first list, "My Tasks", always exists.
+const DEFAULT_LIST = { id: '', name: 'My Tasks' };
+const todoListOf = (t) => (t.list_id && state.todoLists?.some((l) => l.id === t.list_id)) ? t.list_id : '';
+const openDone = new Set();   // lists whose Completed section is open
 async function renderTodos() {
-  try { state.todos = await store.listTodos(); state.personalError = ''; } catch (e) { state.personalError = e.message; }
-  // Tasks completed elsewhere (by you or the assignee) tick their linked to-dos.
+  try {
+    const [todos, lists] = await Promise.all([store.listTodos(), store.listTodoLists ? store.listTodoLists().catch(() => null) : null]);
+    state.todos = todos; state.todoLists = lists; state.personalError = '';
+  } catch (e) { state.personalError = e.message; }
+  // Tasks completed elsewhere tick their linked to-dos.
   for (const td of state.todos) {
     const task = td.task_id && !td.done ? byId(state.tasks, td.task_id) : null;
     if (task && task.status === 'completed') await completeLinkedTodos(task.id);
   }
+  drawTodos();
+}
+function drawTodos() {
   const hasPending = state.todos.some((t) => 'pending' in t) || store.mode === 'demo';
-  const open = state.todos.filter((t) => !t.done && !t.pending).sort((a, b) => a.position - b.position);
-  const pending = state.todos.filter((t) => !t.done && t.pending).sort((a, b) => (b.pending_at || '').localeCompare(a.pending_at || ''));
-  const done = state.todos.filter((t) => t.done).sort((a, b) => (b.done_at || '').localeCompare(a.done_at || ''));
-  const lists = { open, pending, done };
-  const linked = (t) => { const task = t.task_id ? byId(state.tasks, t.task_id) : null; return task ? `<button class="todo-task" data-open-task="${esc(task.id)}" title="Open the full task">${icon.arrow(12)} Task · ${esc(statusOf(task.status).label)}</button>` : ''; };
+  const listsReady = Array.isArray(state.todoLists);
+  const lists = [DEFAULT_LIST, ...(state.todoLists || [])];
   const ago = (iso) => timeAgo(iso).replace(/^Just now$/, 'just now');
-  const when = (t) => t.done && t.done_at ? `Done ${ago(t.done_at)}` : t.pending && t.pending_at ? `Pending ${ago(t.pending_at)}` : t.created_at ? `Added ${ago(t.created_at)}` : '';
-  const item = (t) => `<li class="todo trow ${t.done ? 'is-done' : ''} ${t.pending ? 'is-pending' : ''}" data-todo="${esc(t.id)}" ${todoTab === 'open' ? 'draggable="true"' : ''}>
-      ${todoTab === 'open' ? `<span class="grip" aria-hidden="true" title="Drag to reorder">${icon.grip(14)}</span>` : '<span class="grip-sp"></span>'}
-      <button class="todo-check" data-toggle aria-label="${t.done ? 'Mark as not done' : 'Mark as done'}" aria-pressed="${t.done}" title="${t.done ? 'Mark as not done' : 'Mark as done'}">${icon.check(13)}</button>
-      <div class="trow-main">
+  const linked = (t) => { const task = t.task_id ? byId(state.tasks, t.task_id) : null; return task ? `<button class="todo-task" data-open-task="${esc(task.id)}" title="Open the full task">${icon.arrow(12)} Task · ${esc(statusOf(task.status).label)}</button>` : ''; };
+  const row = (t) => `<li class="tl-row ${t.done ? 'is-done' : ''} ${t.pending ? 'is-pending' : ''}" data-todo="${esc(t.id)}" ${!t.done && !t.pending ? 'draggable="true"' : ''}>
+      <button class="tl-check" data-toggle role="checkbox" aria-checked="${t.done}" aria-label="${t.done ? 'Mark as not done' : 'Mark as done'}" title="${t.done ? 'Mark as not done' : 'Mark as done'}">${I('<path d="M6 12.5l4 4 8-9"/>', 14)}</button>
+      <div class="tl-main">
         <span class="todo-title" data-edit tabindex="0" title="Click to edit">${esc(t.title)}</span>
-        <div class="trow-meta">
+        ${t.pending || t.task_id || t.done ? `<div class="tl-meta">
           ${t.pending ? `<button class="todo-why" data-why title="Click to edit the reason">${icon.clock(12)}<span>${t.pending_note ? esc(t.pending_note) : '<i>No reason given</i>'}</span></button>` : ''}
           ${linked(t)}
-          <span class="trow-when">${esc(when(t))}</span>
-        </div>
+          ${t.done && t.done_at ? `<span class="tl-when">Done ${esc(ago(t.done_at))}</span>` : ''}
+        </div>` : ''}
       </div>
-      <div class="trow-acts">
+      <div class="tl-acts">
         ${!t.done && hasPending ? (t.pending
-          ? `<button class="icon-btn todo-act" data-unpend aria-label="Move back to To-do" title="Move back to To-do">${icon.undo(15)}</button>`
-          : `<button class="icon-btn todo-act" data-pend aria-label="Move to Pending" title="Move to Pending (add a reason)">${icon.clock(15)}</button>`) : ''}
-        <button class="icon-btn todo-del" data-del aria-label="Delete" title="Delete">${icon.trash(15)}</button>
+          ? `<button class="icon-btn" data-unpend aria-label="Move back to the list" title="Move back to the list">${icon.undo(15)}</button>`
+          : `<button class="icon-btn" data-pend aria-label="Move to Pending" title="Move to Pending (add a reason)">${icon.clock(15)}</button>`) : ''}
+        <button class="icon-btn tl-del" data-del aria-label="Delete" title="Delete">${icon.trash(15)}</button>
       </div>
     </li>`;
-  const tab = (id, label, n) => `<button class="${todoTab === id ? 'active' : ''}" data-tab="${id}">${label}<span class="n">${n}</span></button>`;
-  const cur = lists[todoTab];
-  const empties = { open: ['All clear', 'Nothing on your list. Add something above.'], pending: ['Nothing pending', 'Use the clock on a to-do to park it here with a reason.'], done: ['Nothing completed yet', 'Ticked-off items show up here.'] };
-  const today = localToday();
-  const doneToday = done.filter((t) => t.done_at && localDay(t.done_at) === today).length;
-  const pct = open.length + doneToday ? Math.round(doneToday / (open.length + doneToday) * 100) : 0;
-  $('#view').innerHTML = `
-  <section class="content narrow">
-    <div class="page-head"><div><h1>To-do</h1><p>Your private checklist for quick work. Only you can see it.</p></div>
-      <div class="tday" title="Done today vs still open"><div class="tday-ring" style="--p:${pct}"><span>${pct}%</span></div><div><b>${doneToday} done today</b><span>${open.length} still to do${pending.length ? ` · ${pending.length} pending` : ''}</span></div></div>
-    </div>
-    ${personalBlocked()}
-    <div class="card tpanel">
-      <form class="tadd" id="todo-add">
-        <span class="todo-plus">${icon.plus(18)}</span>
-        <input class="todo-input" id="todo-input" maxlength="300" placeholder="Add a to-do…" autocomplete="off" aria-label="New to-do" ${state.personalError ? 'disabled' : ''}>
-        <kbd>Enter</kbd>
+  const card = (l) => {
+    const mine = state.todos.filter((t) => todoListOf(t) === l.id);
+    const open = mine.filter((t) => !t.done && !t.pending).sort((a, b) => a.position - b.position);
+    const pending = mine.filter((t) => !t.done && t.pending).sort((a, b) => (b.pending_at || '').localeCompare(a.pending_at || ''));
+    const done = mine.filter((t) => t.done).sort((a, b) => (b.done_at || '').localeCompare(a.done_at || ''));
+    const empty = !open.length && !pending.length;
+    return `<section class="tl-card" data-list="${esc(l.id)}">
+      <header class="tl-head">
+        <h3 class="tl-name" ${l.id ? 'data-rename tabindex="0" title="Click to rename"' : ''}>${esc(l.name)}</h3>
+        <span class="tl-count">${open.length || ''}</span>
+        <button class="icon-btn" data-list-menu aria-label="List options" title="List options">${icon.dots(18)}</button>
+      </header>
+      <form class="tl-add" data-add>
+        <span class="tl-plus">${icon.plus(18)}</span>
+        <input class="tl-input" maxlength="300" placeholder="Add a task" aria-label="Add a task to ${esc(l.name)}" ${state.personalError ? 'disabled' : ''}>
       </form>
-      <div class="tpanel-tabs"><div class="segmented todo-tabs">${tab('open', 'To-do', open.length)}${hasPending ? tab('pending', 'Pending', pending.length) : ''}${tab('done', 'Completed', done.length)}</div>
-        ${todoTab === 'done' && done.length ? `<button class="btn ghost sm" id="todo-clear" type="button">Clear completed</button>` : ''}</div>
-      ${cur.length ? `<ul class="tlist" id="todo-${todoTab}">${cur.map(item).join('')}</ul>`
-        : `<div class="todo-empty">${todoTab === 'pending' ? icon.clock(28) : icon.check(28)}<b>${empties[todoTab][0]}</b><span>${empties[todoTab][1]}</span></div>`}
+      <ul class="tl-items" data-items>${open.map(row).join('')}</ul>
+      ${empty ? `<div class="tl-empty">${done.length
+          ? `<div class="tl-art done">${icon.check(30)}</div><b>All tasks complete</b><span>Nice work!</span>`
+          : `<div class="tl-art">${icon.list(28)}</div><b>No tasks yet</b><span>Add your to-dos above.</span>`}</div>` : ''}
+      ${pending.length ? `<details class="tl-sec pend" open><summary>${icon.chev(16)} Pending (${pending.length})</summary><ul class="tl-items">${pending.map(row).join('')}</ul></details>` : ''}
+      ${done.length ? `<details class="tl-sec" data-done ${openDone.has(l.id) ? 'open' : ''}><summary>${icon.chev(16)} Completed (${done.length})</summary><ul class="tl-items">${done.map(row).join('')}</ul></details>` : ''}
+    </section>`;
+  };
+  $('#view').innerHTML = `
+  <section class="content wide">
+    <div class="page-head"><div><h1>To-do</h1><p>Your private lists for quick work. Only you can see them.</p></div>
+      ${listsReady ? `<button class="btn primary" id="tl-new">${icon.plus(16)} New list</button>` : ''}</div>
+    ${personalBlocked()}
+    ${!hasPending && !state.personalError ? `<p class="small muted">To use Pending, run supabase/migrations/010_todo_pending.sql in Supabase.</p>` : ''}
+    <div class="tl-board">${lists.map(card).join('')}
+      ${listsReady ? `<button class="tl-newcard" id="tl-new2">${icon.plus(20)}<span>Create new list</span></button>`
+        : !state.personalError ? `<div class="tl-newcard muted small" style="cursor:default">To add more lists, run supabase/migrations/015_lists_and_repeat.sql in Supabase.</div>` : ''}
     </div>
-    ${!hasPending && !state.personalError ? `<p class="small muted" style="margin-top:12px">To use the Pending tab, run supabase/migrations/010_todo_pending.sql in Supabase.</p>` : ''}
-    <p class="small muted" style="margin-top:12px">Click a to-do to edit it, drag the dots to reorder, and use the clock to park it in Pending with a reason. Ticking a to-do that came from a task also completes the task.</p>
+    <p class="small muted" style="margin-top:14px">Tick the box when done. Click a to-do to edit it, drag to reorder or move it to another list, and use the clock to park it in Pending with a reason. Ticking a to-do that came from a task also completes the task.</p>
   </section>`;
+  bindTodos(hasPending);
+}
 
-  const input = $('#todo-input');
-  if (!state.personalError && todoTab === 'open') input.focus();
-  $$('[data-tab]').forEach((b) => b.addEventListener('click', () => { todoTab = b.dataset.tab; renderTodos(); }));
-  $('#todo-add').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const title = input.value.trim(); if (!title) return;
-    const top = open.length ? Math.min(...open.map((t) => t.position)) - 1 : Date.now() / 1000;
-    input.value = '';
-    try { const t = await store.addTodo(title, top); state.todos.push(t); todoTab = 'open'; renderTodos(); updateCounts(); } catch (ex) { input.value = title; fail(ex); }
+function bindTodos(hasPending) {
+  const view = $('#view');
+  const refresh = () => { drawTodos(); updateCounts(); };
+  const newList = async () => {
+    const name = await promptDialog({ title: 'Create new list', placeholder: 'e.g. Today, Calls to make, This week', confirm: 'Create list' });
+    if (!name?.trim()) return;
+    try { const l = await store.addTodoList(name.trim()); state.todoLists.push(l); refresh(); $(`[data-list="${l.id}"] .tl-input`)?.focus(); toast('List created', l.name, 'green', icon.list); } catch (ex) { fail(ex); }
+  };
+  $('#tl-new')?.addEventListener('click', newList);
+  $('#tl-new2')?.addEventListener('click', newList);
+
+  $$('.tl-card', view).forEach((cardEl) => {
+    const listId = cardEl.dataset.list;
+    const l = listId ? byId(state.todoLists, listId) : DEFAULT_LIST;
+    // add
+    $('[data-add]', cardEl).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = $('.tl-input', cardEl); const title = input.value.trim(); if (!title) return;
+      const open = state.todos.filter((t) => todoListOf(t) === listId && !t.done && !t.pending);
+      const top = open.length ? Math.min(...open.map((t) => t.position)) - 1 : Date.now() / 1000;
+      input.value = '';
+      try { const t = await store.addTodo(title, top, null, listId || null); state.todos.push(t); refresh(); $(`[data-list="${listId}"] .tl-input`)?.focus(); }
+      catch (ex) { input.value = title; fail(ex); }
+    });
+    // rename
+    const nm = $('[data-rename]', cardEl);
+    const rename = async () => {
+      const v = await promptDialog({ title: 'Rename list', value: l.name, confirm: 'Save' });
+      if (!v?.trim() || v.trim() === l.name) return;
+      try { Object.assign(l, await store.updateTodoList(l.id, { name: v.trim() })); refresh(); } catch (ex) { fail(ex); }
+    };
+    nm?.addEventListener('click', rename); nm?.addEventListener('keydown', (e) => { if (e.key === 'Enter') rename(); });
+    // list menu
+    $('[data-list-menu]', cardEl).addEventListener('click', (e) => {
+      const done = state.todos.filter((t) => todoListOf(t) === listId && t.done);
+      openMenu(e.currentTarget, [
+        ...(listId ? [{ label: 'Rename list', ic: icon.pencil, onClick: rename }] : []),
+        { label: `Clear completed (${done.length})`, ic: icon.check, onClick: async () => {
+          if (!done.length) return toast('Nothing to clear', '', 'gray', icon.check);
+          if (!await confirmDialog({ title: `Clear ${done.length} completed to-do${done.length === 1 ? '' : 's'}?`, confirm: 'Clear' })) return;
+          try { for (const t of done) await store.deleteTodo(t.id); state.todos = state.todos.filter((t) => !done.includes(t)); refresh(); } catch (ex) { fail(ex); }
+        } },
+        ...(listId ? [{ label: 'Delete list', ic: icon.trash, danger: true, onClick: async () => {
+          const n = state.todos.filter((t) => t.list_id === listId).length;
+          if (!await confirmDialog({ title: `Delete "${l.name}"?`, body: n ? `Its ${n} to-do${n === 1 ? '' : 's'} will be deleted too.` : 'The list is empty.', confirm: 'Delete list' })) return;
+          try { await store.deleteTodoList(listId); state.todoLists = state.todoLists.filter((x) => x.id !== listId); state.todos = state.todos.filter((t) => t.list_id !== listId); refresh(); toast('List deleted', l.name, 'gray', icon.trash); } catch (ex) { fail(ex); }
+        } }] : []),
+      ], { title: l.name });
+    });
+    $('[data-done]', cardEl)?.addEventListener('toggle', (e) => { e.target.open ? openDone.add(listId) : openDone.delete(listId); });
   });
-  $('#todo-clear')?.addEventListener('click', async () => {
-    if (!await confirmDialog({ title: `Clear ${done.length} completed to-do${done.length === 1 ? '' : 's'}?`, confirm: 'Clear' })) return;
-    try { await store.clearDoneTodos(); state.todos = state.todos.filter((t) => !t.done); renderTodos(); } catch (ex) { fail(ex); }
-  });
+
   const askWhy = (t) => promptDialog({ title: t.pending ? 'Why is this pending?' : 'Move to Pending', body: t.title, placeholder: 'e.g. Waiting for the rate card from Prozo', value: t.pending_note || '', confirm: t.pending ? 'Save' : 'Move to Pending' });
-  $$('[data-todo]').forEach((li) => {
+  $$('[data-todo]', view).forEach((li) => {
     const id = li.dataset.todo; const t = byId(state.todos, id);
     $('[data-toggle]', li).addEventListener('click', async () => {
       li.classList.add('ticking');
@@ -1643,23 +1789,22 @@ async function renderTodos() {
           if (canChangeStatus(task)) await changeStatus(task.id, 'completed');
           else toast('To-do done', 'The task itself stays open: only the assignee or the person who created it can complete it.', 'orange', icon.lock);
         }
-        setTimeout(() => { renderTodos(); updateCounts(); }, t.done ? 480 : 0);
+        setTimeout(refresh, t.done ? 420 : 0);
       } catch (ex) { li.classList.remove('ticking'); fail(ex); }
     });
     $('[data-pend]', li)?.addEventListener('click', async () => {
       const why = await askWhy(t); if (why === null) return;
-      try { Object.assign(t, await store.updateTodo(id, { pending: true, pending_note: why, pending_at: new Date().toISOString() })); renderTodos(); updateCounts(); toast('Moved to Pending', why || '', 'orange', icon.clock); } catch (ex) { fail(ex); }
+      try { Object.assign(t, await store.updateTodo(id, { pending: true, pending_note: why, pending_at: new Date().toISOString() })); refresh(); toast('Moved to Pending', why || '', 'orange', icon.clock); } catch (ex) { fail(ex); }
     });
     $('[data-unpend]', li)?.addEventListener('click', async () => {
-      try { Object.assign(t, await store.updateTodo(id, { pending: false })); renderTodos(); updateCounts(); toast('Back on your To-do list', t.title, 'blue', icon.undo); } catch (ex) { fail(ex); }
+      try { Object.assign(t, await store.updateTodo(id, { pending: false })); refresh(); } catch (ex) { fail(ex); }
     });
     const why = $('[data-why]', li);
-    const editWhy = async () => { const v = await askWhy(t); if (v === null) return; try { Object.assign(t, await store.updateTodo(id, { pending_note: v })); renderTodos(); } catch (ex) { fail(ex); } };
-    why?.addEventListener('click', editWhy); why?.addEventListener('keydown', (e) => { if (e.key === 'Enter') editWhy(); });
+    why?.addEventListener('click', async () => { const v = await askWhy(t); if (v === null) return; try { Object.assign(t, await store.updateTodo(id, { pending_note: v })); refresh(); } catch (ex) { fail(ex); } });
     $('[data-open-task]', li)?.addEventListener('click', () => openTask(byId(state.tasks, li.querySelector('[data-open-task]').dataset.openTask)));
     $('[data-del]', li).addEventListener('click', async () => {
       li.classList.add('removing');
-      try { await store.deleteTodo(id); state.todos = state.todos.filter((x) => x.id !== id); setTimeout(() => { renderTodos(); updateCounts(); }, 180); } catch (ex) { li.classList.remove('removing'); fail(ex); }
+      try { await store.deleteTodo(id); state.todos = state.todos.filter((x) => x.id !== id); setTimeout(refresh, 180); } catch (ex) { li.classList.remove('removing'); fail(ex); }
     });
     const title = $('[data-edit]', li);
     const startEdit = () => {
@@ -1675,35 +1820,186 @@ async function renderTodos() {
         try { Object.assign(t, await store.updateTodo(id, { title: v })); title.textContent = v; } catch (ex) { fail(ex); }
         ed.replaceWith(title);
       };
-      ed.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } if (e.key === 'Escape') finish(false); });
+      ed.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } if (e.key === 'Escape') { e.stopPropagation(); finish(false); } });
       ed.addEventListener('blur', () => finish(true));
     };
     title.addEventListener('click', startEdit);
     title.addEventListener('keydown', (e) => { if (e.key === 'Enter') startEdit(); });
   });
-  // Drag to reorder (To-do tab). The new position sits between its neighbours.
-  const list = $('#todo-open');
-  if (list) {
-    let dragging = null;
-    list.addEventListener('dragstart', (e) => { dragging = e.target.closest('[data-todo]'); if (!dragging) return; dragging.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragging.dataset.todo); });
-    list.addEventListener('dragover', (e) => {
-      if (!dragging) return; e.preventDefault();
-      const after = [...list.querySelectorAll('[data-todo]:not(.dragging)')].find((el) => { const r = el.getBoundingClientRect(); return e.clientY < r.top || (e.clientY < r.bottom && e.clientX < r.left + r.width / 2); });
-      if (after) list.insertBefore(dragging, after); else list.appendChild(dragging);
+
+  // Drag to reorder, or drop on another list to move it there.
+  let dragging = null;
+  view.ondragstart = (e) => {
+    dragging = e.target.closest?.('.tl-row[draggable="true"]'); if (!dragging) return;
+    dragging.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragging.dataset.todo);
+  };
+  $$('.tl-card', view).forEach((cardEl) => {
+    const ul = $('.tl-items[data-items]', cardEl);
+    cardEl.addEventListener('dragover', (e) => {
+      if (!dragging) return; e.preventDefault(); cardEl.classList.add('drop');
+      const after = [...ul.querySelectorAll('[data-todo]:not(.dragging)')].find((el) => e.clientY < el.getBoundingClientRect().top + el.offsetHeight / 2);
+      if (after) ul.insertBefore(dragging, after); else ul.appendChild(dragging);
     });
-    list.addEventListener('dragend', async () => {
-      if (!dragging) return;
-      const el = dragging; dragging = null; el.classList.remove('dragging');
-      const ids = [...list.querySelectorAll('[data-todo]')].map((x) => x.dataset.todo);
-      const i = ids.indexOf(el.dataset.todo);
-      const pos = (k) => byId(state.todos, ids[k])?.position;
-      const prev = i > 0 ? pos(i - 1) : null, next = i < ids.length - 1 ? pos(i + 1) : null;
-      const np = prev === null ? next - 1 : next === null ? prev + 1 : (prev + next) / 2;
-      const t = byId(state.todos, el.dataset.todo);
-      if (t.position === np) return;
-      try { Object.assign(t, await store.updateTodo(t.id, { position: np })); } catch (ex) { fail(ex); renderTodos(); }
-    });
+    cardEl.addEventListener('dragleave', (e) => { if (!cardEl.contains(e.relatedTarget)) cardEl.classList.remove('drop'); });
+  });
+  view.ondragend = async () => {
+    if (!dragging) return;
+    const el = dragging; dragging = null; el.classList.remove('dragging');
+    $$('.tl-card.drop', view).forEach((c) => c.classList.remove('drop'));
+    const cardEl = el.closest('.tl-card'); const listId = cardEl.dataset.list;
+    const ids = [...$('.tl-items[data-items]', cardEl).querySelectorAll('[data-todo]')].map((x) => x.dataset.todo);
+    const i = ids.indexOf(el.dataset.todo);
+    const pos = (k) => byId(state.todos, ids[k])?.position;
+    const prev = i > 0 ? pos(i - 1) : null, next = i < ids.length - 1 ? pos(i + 1) : null;
+    const t = byId(state.todos, el.dataset.todo);
+    const np = prev === null && next === null ? t.position : prev === null ? next - 1 : next === null ? prev + 1 : (prev + next) / 2;
+    const patch = {};
+    if (np !== t.position) patch.position = np;
+    if ((t.list_id || '') !== listId) patch.list_id = listId || null;
+    if (!Object.keys(patch).length) return;
+    try { Object.assign(t, await store.updateTodo(t.id, patch)); if ('list_id' in patch) { refresh(); toast('Moved', `To ${(listId ? byId(state.todoLists, listId) : DEFAULT_LIST).name}`, 'blue', icon.list); } }
+    catch (ex) { fail(ex); refresh(); }
+  };
+}
+
+// =====================================================================
+//  Reports: completed work for a period, ready to send to management
+// =====================================================================
+const rpt = { period: 'this_week', from: '', to: '', person: 'all', platform: 'all' };
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function reportRange() {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  const monday = (x) => { const y = new Date(x); y.setDate(y.getDate() - ((y.getDay() + 6) % 7)); return y; };
+  const add = (x, n) => { const y = new Date(x); y.setDate(y.getDate() + n); return y; };
+  switch (rpt.period) {
+    case 'today': return [isoDay(d), isoDay(d), 'Today'];
+    case 'yesterday': return [isoDay(add(d, -1)), isoDay(add(d, -1)), 'Yesterday'];
+    case 'last_week': { const m = add(monday(d), -7); return [isoDay(m), isoDay(add(m, 6)), 'Last week']; }
+    case 'this_month': return [isoDay(new Date(d.getFullYear(), d.getMonth(), 1)), isoDay(d), 'This month'];
+    case 'last_month': return [isoDay(new Date(d.getFullYear(), d.getMonth() - 1, 1)), isoDay(new Date(d.getFullYear(), d.getMonth(), 0)), 'Last month'];
+    case 'custom': return [rpt.from || isoDay(d), rpt.to || isoDay(d), 'Custom'];
+    default: return [isoDay(monday(d)), isoDay(d), 'This week'];
   }
+}
+// Whose work this person may report on: admins everyone; managers themselves and the tasks they assign; members themselves.
+const reportTasks = () => state.tasks.filter((t) => isAdmin() || t.assigned_to === state.me.id || (isManager() && t.created_by === state.me.id));
+
+function buildReport() {
+  const [from, to, label] = reportRange();
+  const inPeople = (t) => rpt.person === 'all' || t.assigned_to === rpt.person;
+  const inPlat = (t) => rpt.platform === 'all' || (rpt.platform === 'none' ? !t.platform_id : t.platform_id === rpt.platform);
+  const pool = reportTasks().filter((t) => inPeople(t) && inPlat(t));
+  const doneIn = pool.filter((t) => t.status === 'completed' && t.completed_at && localDay(t.completed_at) >= from && localDay(t.completed_at) <= to)
+    .sort((a, b) => a.completed_at.localeCompare(b.completed_at));
+  const onTime = (t) => !t.due_date || localDay(t.completed_at) <= t.due_date;
+  const open = pool.filter((t) => t.status !== 'completed');
+  const today = localToday();
+  const overdue = open.filter((t) => t.due_date && t.due_date < today);
+  const people = [...new Set([...doneIn, ...open].map((t) => t.assigned_to))].map((id) => {
+    const d = doneIn.filter((t) => t.assigned_to === id), o = open.filter((t) => t.assigned_to === id);
+    return { p: person(id), done: d.length, onTime: d.filter(onTime).length, open: o.length, overdue: o.filter((t) => t.due_date && t.due_date < today).length,
+      hold: o.filter((t) => t.status === 'on_hold').length };
+  }).sort((a, b) => b.done - a.done || a.p.full_name.localeCompare(b.p.full_name));
+  const hrs = doneIn.map((t) => (new Date(t.completed_at) - new Date(t.created_at)) / 36e5).filter((h) => h >= 0);
+  return { from, to, label, doneIn, open, overdue, people, onTime, onTimeN: doneIn.filter(onTime).length,
+    avgHrs: hrs.length ? hrs.reduce((a, b) => a + b, 0) / hrs.length : null,
+    scope: rpt.person === 'all' ? (isAdmin() ? 'Everyone' : isManager() ? 'My team' : state.me.full_name) : person(rpt.person).full_name,
+    plat: rpt.platform === 'all' ? '' : rpt.platform === 'none' ? 'No platform' : (platformOf(rpt.platform)?.name || '') };
+}
+const fmtSpan = (r) => r.from === r.to ? fmtDate(r.from) : `${fmtDate(r.from)} – ${fmtDate(r.to)}`;
+const fmtHrs = (h) => h == null ? '—' : h < 24 ? `${Math.round(h)} h` : `${(h / 24).toFixed(1)} days`;
+const pctOf = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
+
+function reportText(r) {
+  const L = [];
+  L.push(`Task completion report · ${r.scope}${r.plat ? ' · ' + r.plat : ''}`);
+  L.push(`${r.label}: ${fmtSpan(r)}`);
+  L.push('');
+  L.push(`Completed: ${r.doneIn.length} (on time ${pctOf(r.onTimeN, r.doneIn.length)})`);
+  L.push(`Still open: ${r.open.length}${r.overdue.length ? ` · overdue: ${r.overdue.length}` : ''}`);
+  if (r.people.length > 1) { L.push(''); L.push('By person:'); r.people.forEach((x) => L.push(`• ${x.p.full_name}: ${x.done} completed, ${x.open} open${x.overdue ? `, ${x.overdue} overdue` : ''}`)); }
+  if (r.doneIn.length) { L.push(''); L.push('Completed tasks:'); r.doneIn.forEach((t) => L.push(`✓ ${t.title} (${person(t.assigned_to).full_name}${platformOf(t.platform_id) ? ', ' + platformOf(t.platform_id).name : ''}) · ${fmtDate(localDay(t.completed_at))}${r.onTime(t) ? '' : ' · late'}`)); }
+  if (r.overdue.length) { L.push(''); L.push('Overdue:'); r.overdue.forEach((t) => L.push(`! ${t.title} (${person(t.assigned_to).full_name}) · due ${fmtDate(t.due_date)}`)); }
+  L.push(''); L.push(`Prepared by ${state.me.full_name} with ${CONFIG.APP_NAME} on ${fmtDateTime(new Date().toISOString())}`);
+  return L.join('\n');
+}
+function reportCsv(r) {
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = [['Task', 'Assigned to', 'Assigned by', 'Platform', 'Priority', 'Status', 'Due date', 'Completed on', 'On time']];
+  [...r.doneIn, ...r.open].forEach((t) => rows.push([t.title, person(t.assigned_to).full_name, person(t.created_by).full_name, platformOf(t.platform_id)?.name || '',
+    prioOf(t.priority).label, statusOf(t.status).label, t.due_date || '', t.completed_at ? localDay(t.completed_at) : '', t.completed_at ? (r.onTime(t) ? 'Yes' : 'No') : '']));
+  return rows.map((x) => x.map(q).join(',')).join('\r\n');
+}
+
+function renderReports() {
+  const r = buildReport();
+  const ppl = [...new Set(reportTasks().map((t) => t.assigned_to))].map(person).sort((a, b) => a.full_name.localeCompare(b.full_name));
+  const plats = [...new Set(reportTasks().map((t) => t.platform_id).filter(Boolean))].map(platformOf).filter(Boolean);
+  const P = { today: 'Today', yesterday: 'Yesterday', this_week: 'This week', last_week: 'Last week', this_month: 'This month', last_month: 'Last month', custom: 'Custom dates' };
+  const tile = (k, v, sub = '', tone = '') => `<div class="r-tile ${tone}"><span>${k}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
+  $('#view').innerHTML = `
+  <section class="content">
+    <div class="page-head no-print"><div><h1>Reports</h1><p>A summary of completed work, ready to send to management.</p></div>
+      <div class="r-actions">
+        <button class="btn" id="r-copy">${icon.copy(15)} Copy</button>
+        <button class="btn" id="r-mail">${icon.mail(15)} Email</button>
+        <button class="btn" id="r-csv">${icon.download(15)} Excel (CSV)</button>
+        <button class="btn primary" id="r-print">${icon.print(15)} PDF / Print</button>
+      </div></div>
+    <div class="toolbar r-filters no-print">
+      <div class="segmented" id="r-period">${['today', 'this_week', 'last_week', 'this_month', 'last_month', 'custom'].map((k) => `<button class="${rpt.period === k ? 'active' : ''}" data-p="${k}">${P[k]}</button>`).join('')}</div>
+      ${rpt.period === 'custom' ? `<input class="input r-date" type="date" id="r-from" value="${esc(r.from)}" aria-label="From"><span class="muted">to</span><input class="input r-date" type="date" id="r-to" value="${esc(r.to)}" aria-label="To">` : ''}
+      ${ppl.length > 1 ? `<select class="select" id="r-person" aria-label="Person"><option value="all">${isAdmin() ? 'Everyone' : 'Everyone on my tasks'}</option>${ppl.map((p) => `<option value="${esc(p.id)}" ${rpt.person === p.id ? 'selected' : ''}>${esc(p.id === state.me.id ? p.full_name + ' (me)' : p.full_name)}</option>`).join('')}</select>` : ''}
+      ${plats.length ? `<select class="select" id="r-plat" aria-label="Platform"><option value="all">All platforms</option>${plats.map((p) => `<option value="${esc(p.id)}" ${rpt.platform === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}<option value="none" ${rpt.platform === 'none' ? 'selected' : ''}>No platform</option></select>` : ''}
+    </div>
+    <article class="card report" id="report">
+      <header class="r-head">
+        <div><h2>Task completion report</h2><p>${esc(r.scope)}${r.plat ? ' · ' + esc(r.plat) : ''} · ${esc(r.label)}: <b>${esc(fmtSpan(r))}</b></p></div>
+        <div class="r-by">Prepared by ${esc(state.me.full_name)}<br>${esc(fmtDateTime(new Date().toISOString()))}</div>
+      </header>
+      <div class="r-tiles">
+        ${tile('Completed', r.doneIn.length, r.doneIn.length ? `${r.onTimeN} on time` : '', 'green')}
+        ${tile('On-time rate', pctOf(r.onTimeN, r.doneIn.length), r.doneIn.length - r.onTimeN ? `${r.doneIn.length - r.onTimeN} late` : '')}
+        ${tile('Avg. time to finish', fmtHrs(r.avgHrs))}
+        ${tile('Still open', r.open.length, r.open.filter((t) => t.status === 'on_hold').length ? `${r.open.filter((t) => t.status === 'on_hold').length} on hold` : '')}
+        ${tile('Overdue', r.overdue.length, '', r.overdue.length ? 'red' : '')}
+      </div>
+      ${r.people.length ? `<h3>By person</h3><div class="r-scroll"><table class="r-table">
+        <thead><tr><th>Person</th><th>Completed</th><th>On time</th><th>Open</th><th>Overdue</th></tr></thead>
+        <tbody>${r.people.map((x) => `<tr><td><span class="r-who">${avatar(x.p, 'sm')}${esc(x.p.full_name)}</span></td><td><b>${x.done}</b></td><td>${pctOf(x.onTime, x.done)}</td><td>${x.open}${x.hold ? ` <span class="muted small">(${x.hold} on hold)</span>` : ''}</td><td class="${x.overdue ? 'r-bad' : ''}">${x.overdue}</td></tr>`).join('')}</tbody></table></div>` : ''}
+      <h3>Completed tasks (${r.doneIn.length})</h3>
+      ${r.doneIn.length ? `<div class="r-scroll"><table class="r-table">
+        <thead><tr><th>Task</th><th>Person</th><th>Platform</th><th>Due</th><th>Completed</th><th></th></tr></thead>
+        <tbody>${r.doneIn.map((t) => `<tr><td class="r-title">${esc(t.title)}</td><td>${esc(person(t.assigned_to).full_name)}</td><td>${esc(platformOf(t.platform_id)?.name || '—')}</td>
+          <td>${t.due_date ? esc(fmtDate(t.due_date)) : '—'}</td><td>${esc(fmtDate(localDay(t.completed_at)))}</td>
+          <td>${r.onTime(t) ? '<span class="pill tone-green">On time</span>' : '<span class="pill tone-orange">Late</span>'}</td></tr>`).join('')}</tbody></table></div>`
+        : `<p class="muted">No tasks were completed in this period.</p>`}
+      ${r.overdue.length ? `<h3>Overdue (${r.overdue.length})</h3><div class="r-scroll"><table class="r-table">
+        <thead><tr><th>Task</th><th>Person</th><th>Due</th><th>Status</th></tr></thead>
+        <tbody>${r.overdue.map((t) => `<tr><td class="r-title">${esc(t.title)}</td><td>${esc(person(t.assigned_to).full_name)}</td><td class="r-bad">${esc(fmtDate(t.due_date))}</td><td>${esc(statusOf(t.status).label)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    </article>
+  </section>`;
+
+  $$('[data-p]').forEach((b) => b.addEventListener('click', () => { rpt.period = b.dataset.p; renderReports(); }));
+  $('#r-from')?.addEventListener('change', (e) => { rpt.from = e.target.value; renderReports(); });
+  $('#r-to')?.addEventListener('change', (e) => { rpt.to = e.target.value; renderReports(); });
+  $('#r-person')?.addEventListener('change', (e) => { rpt.person = e.target.value; renderReports(); });
+  $('#r-plat')?.addEventListener('change', (e) => { rpt.platform = e.target.value; renderReports(); });
+  $('#r-copy').addEventListener('click', async () => {
+    const text = reportText(r);
+    try { await navigator.clipboard.writeText(text); toast('Report copied', 'Paste it into email, WhatsApp or Teams.', 'green', icon.copy); } catch { prompt('Copy this report', text); }
+  });
+  $('#r-mail').addEventListener('click', () => {
+    const subject = `Task completion report · ${r.scope} · ${fmtSpan(r)}`;
+    let body = reportText(r); if (body.length > 1800) body = body.slice(0, 1800) + '\n… (full report: use Copy or PDF)';
+    location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  });
+  $('#r-csv').addEventListener('click', () => {
+    const blob = new Blob(['﻿' + reportCsv(r)], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `task-report-${r.from}-to-${r.to}.csv`;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  });
+  $('#r-print').addEventListener('click', () => window.print());
 }
 
 // =====================================================================
@@ -1785,6 +2081,307 @@ function drawNotes(q = $('#note-search')?.value || '') {
 let flushNote = async () => {};
 window.addEventListener('hashchange', () => { flushNote(); });
 window.addEventListener('beforeunload', () => { flushNote(); });
+
+// =====================================================================
+//  Export a task list to Excel (.xlsx) or PDF. Runs in the browser; the
+//  libraries are bundled in js/vendor and loaded only when needed.
+// =====================================================================
+const loaded = {};
+const loadScript = (src) => (loaded[src] ||= new Promise((ok, no) => {
+  const el = document.createElement('script'); el.src = src; el.onload = ok;
+  el.onerror = () => { delete loaded[src]; no(new Error('Could not load the export tool. Check your connection and try again.')); };
+  document.head.appendChild(el);
+}));
+function openExportMenu(anchor, ex) {
+  if (!ex?.tasks.length) { toast('Nothing to export', 'There are no tasks in this list.', 'gray', icon.info); return; }
+  const n = ex.tasks.length;
+  openMenu(anchor, [
+    { label: 'Excel (.xlsx)', hint: `${n} task${n === 1 ? '' : 's'}, one row each, with filters`, ic: icon.grid, onClick: () => runExport('xlsx', ex) },
+    { label: 'PDF report', hint: 'Summary and a table, ready to share', ic: icon.report, onClick: () => runExport('pdf', ex) },
+  ], { title: `Export ${ex.title}` });
+}
+async function runExport(kind, ex) {
+  try {
+    if (kind === 'xlsx') { await loadScript('js/vendor/xlsx.mini.min.js'); exportXlsx(ex); }
+    else { await loadScript('js/vendor/jspdf.umd.min.js'); await loadScript('js/vendor/jspdf.plugin.autotable.min.js'); exportPdf(ex); }
+  } catch (e) { fail(e); }
+}
+// A plain download link works on desktop browsers and on iPhone/Android.
+function saveBlob(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+const exportName = (ex, ext) => `${CONFIG.APP_NAME}-${ex.title}-${localToday()}`.replace(/[^\w-]+/g, '-').replace(/-+/g, '-').toLowerCase() + '.' + ext;
+const latestRemark = (t) => remarksFor(t.id).slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))[0];
+const isLate = (t) => t.status !== 'completed' && dueInfo(t)?.state === 'overdue';
+function exportSummary(tasks) {
+  return { total: tasks.length, done: tasks.filter((t) => t.status === 'completed').length, prog: tasks.filter((t) => t.status === 'in_progress').length,
+    hold: tasks.filter((t) => t.status === 'on_hold').length, over: tasks.filter(isLate).length };
+}
+function exportRange(tasks) {
+  const d = tasks.map((t) => t.due_date).filter(Boolean).sort();
+  return d.length ? (d[0] === d[d.length - 1] ? fmtDate(d[0]) : `${fmtDate(d[0])} - ${fmtDate(d[d.length - 1])}`) : 'No due dates';
+}
+function exportScope() {
+  const me = state.me;
+  return [me.department_id ? deptName(me.department_id) : '', me.team_id ? teamName(me.team_id) : ''].filter(Boolean).join(' / ') || 'All teams';
+}
+
+function exportXlsx(ex) {
+  const X = window.XLSX;
+  const day = (iso) => iso ? new Date(iso.length === 10 ? iso + 'T00:00:00' : iso) : '';
+  const head = ['Task', 'Platform', 'Priority', 'Status', 'Assigned by', 'Assigned to', 'Created', 'Due', 'Completed', 'Latest remark'];
+  const rows = ex.tasks.map((t) => {
+    const r = latestRemark(t);
+    return [t.title, platformOf(t.platform_id)?.name || '', prioOf(t.priority).label, isLate(t) ? `${statusOf(t.status).label} (overdue)` : statusOf(t.status).label,
+      person(t.created_by).full_name, person(t.assigned_to).full_name, day(t.created_at), day(t.due_date), t.completed_at ? day(t.completed_at) : '',
+      r ? `${person(r.author_id).full_name}: ${r.body || ''}`.slice(0, 2000) : ''];
+  });
+  const ws = X.utils.aoa_to_sheet([head, ...rows], { cellDates: true, dateNF: 'dd-mmm-yyyy' });
+  // date columns: show as dates, and completed with the time
+  for (let i = 0; i < rows.length; i++) ['G', 'H', 'I'].forEach((c) => { const cell = ws[c + (i + 2)]; if (cell && cell.t === 'd') cell.z = c === 'I' ? 'dd-mmm-yyyy hh:mm' : 'dd-mmm-yyyy'; });
+  ws['!cols'] = [48, 16, 10, 22, 20, 20, 13, 13, 18, 60].map((w) => ({ wch: w }));
+  ws['!autofilter'] = { ref: `A1:J${rows.length + 1}` };
+  const sm = exportSummary(ex.tasks);
+  const info = X.utils.aoa_to_sheet([
+    [`${CONFIG.APP_NAME} · Task report`], [],
+    ['List', ex.title], ['Due dates', exportRange(ex.tasks)], ['Team', exportScope()], ['Exported by', state.me.full_name], ['Exported on', new Date()], ['Filters', ex.filters.join(', ')], [],
+    ['Total tasks', sm.total], ['Completed', sm.done], ['In progress', sm.prog], ['On hold', sm.hold], ['Overdue', sm.over],
+  ], { cellDates: true });
+  if (info.B7) info.B7.z = 'dd-mmm-yyyy hh:mm';
+  info['!cols'] = [{ wch: 16 }, { wch: 50 }];
+  const wb = X.utils.book_new();
+  X.utils.book_append_sheet(wb, ws, 'Tasks');
+  X.utils.book_append_sheet(wb, info, 'Summary');
+  wb.Props = { Title: `${ex.title} - task report`, Author: state.me.full_name, CreatedDate: new Date() };
+  saveBlob(new Blob([X.write(wb, { bookType: 'xlsx', type: 'array', compression: true })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), exportName(ex, 'xlsx'));
+  toast('Excel file ready', `${rows.length} task${rows.length === 1 ? '' : 's'} exported.`, 'green', icon.download);
+}
+
+function exportPdf(ex) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+  // The built-in PDF fonts only cover Western characters; swap the few others we use.
+  const txt = (v) => String(v ?? '').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/…/g, '...').replace(/[^\x00-\xFF]/g, '?');
+  const W = doc.internal.pageSize.getWidth(), M = 40;
+  const ink = [32, 34, 36], muted = [110, 113, 118], line = [225, 227, 229];
+  const TONE = { not_started: [[241, 242, 243], [74, 74, 74]], in_progress: [[224, 240, 255], [0, 82, 163]], on_hold: [[255, 241, 204], [122, 79, 1]],
+    completed: [[205, 254, 225], [12, 82, 48]], overdue: [[254, 226, 222], [142, 31, 11]] };
+  const sm = exportSummary(ex.tasks);
+  // header
+  doc.setFillColor(26, 26, 26); doc.rect(0, 0, W, 6, 'F');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(...ink);
+  doc.text(txt(`${CONFIG.APP_NAME} · Task report`), M, 46);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...muted);
+  doc.text(txt(`${ex.title}  ·  Due ${exportRange(ex.tasks)}  ·  ${exportScope()}`), M, 64);
+  doc.text(txt(`Exported by ${state.me.full_name} on ${fmtDateTime(new Date().toISOString())}`), M, 78);
+  // summary boxes
+  const boxes = [['Total', sm.total, ink], ['Completed', sm.done, [12, 82, 48]], ['In progress', sm.prog, [0, 82, 163]], ['Overdue', sm.over, [142, 31, 11]]];
+  const gap = 10, bw = (W - 2 * M - gap * 3) / 4, by = 94;
+  boxes.forEach(([k, v, c], i) => {
+    const x = M + i * (bw + gap);
+    doc.setDrawColor(...line); doc.setFillColor(250, 250, 251); doc.roundedRect(x, by, bw, 52, 6, 6, 'FD');
+    doc.setFontSize(9); doc.setTextColor(...muted); doc.text(k.toUpperCase(), x + 12, by + 18);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(...c); doc.text(String(v), x + 12, by + 41);
+    doc.setFont('helvetica', 'normal');
+  });
+  const pct = sm.total ? Math.round((sm.done / sm.total) * 100) : 0;
+  doc.setDrawColor(...line); doc.setFillColor(236, 237, 238); doc.roundedRect(M, by + 62, W - 2 * M, 5, 2.5, 2.5, 'F');
+  if (pct) { doc.setFillColor(4, 123, 93); doc.roundedRect(M, by + 62, (W - 2 * M) * pct / 100, 5, 2.5, 2.5, 'F'); }
+  doc.setFontSize(9); doc.setTextColor(...muted); doc.text(`${pct}% completed`, W - M, by + 80, { align: 'right' });
+  // table
+  const body = ex.tasks.map((t, i) => {
+    const late = isLate(t); const pl = platformOf(t.platform_id)?.name;
+    const due = t.due_date ? fmtDate(t.due_date) + (t.due_time ? ' ' + fmtTime(t.due_time) : '') : '-';
+    return { i: i + 1, task: txt(t.title) + (pl || t.priority === 'high' || t.priority === 'urgent' ? `\n${txt([pl, prioOf(t.priority).label + ' priority'].filter(Boolean).join('  ·  '))}` : ''),
+      who: txt(person(t.assigned_to).full_name), due: txt(due), status: txt(late ? `${statusOf(t.status).label} - overdue` : statusOf(t.status).label), key: late ? 'overdue' : t.status };
+  });
+  doc.autoTable({
+    startY: by + 92, margin: { left: M, right: M, bottom: 50 },
+    head: [['#', 'Task', 'Assigned to', 'Due', 'Status']],
+    body: body.map((r) => [r.i, r.task, r.who, r.due, r.status]),
+    theme: 'plain',
+    styles: { font: 'helvetica', fontSize: 9.5, textColor: ink, cellPadding: { top: 7, bottom: 7, left: 6, right: 6 }, lineColor: line, lineWidth: { bottom: 0.6 }, valign: 'middle', overflow: 'linebreak' },
+    headStyles: { fillColor: [243, 243, 244], textColor: muted, fontStyle: 'bold', fontSize: 8.5, lineWidth: { bottom: 0.8 } },
+    columnStyles: { 0: { cellWidth: 24, textColor: muted, halign: 'right' }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 100 }, 3: { cellWidth: 78 }, 4: { cellWidth: 104 } },
+    didParseCell: (d) => {
+      if (d.section !== 'body') return;
+      if (d.column.index === 4) { const [bg, fg] = TONE[body[d.row.index].key] || TONE.not_started; d.cell.styles.fillColor = bg; d.cell.styles.textColor = fg; d.cell.styles.fontStyle = 'bold'; d.cell.styles.fontSize = 8.5; }
+      if (d.column.index === 3 && body[d.row.index].key === 'overdue') { d.cell.styles.textColor = [142, 31, 11]; d.cell.styles.fontStyle = 'bold'; }
+    },
+  });
+  // footer on every page
+  const pages = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    const H = doc.internal.pageSize.getHeight();
+    doc.setDrawColor(...line); doc.line(M, H - 34, W - M, H - 34);
+    doc.setFontSize(8.5); doc.setTextColor(...muted);
+    doc.text(txt(`Filters: ${ex.filters.join(', ') || 'none'}`), M, H - 20, { maxWidth: W - 2 * M - 90 });
+    doc.text(`Page ${i} of ${pages}`, W - M, H - 20, { align: 'right' });
+  }
+  doc.setProperties({ title: `${ex.title} - task report`, author: state.me.full_name, creator: CONFIG.APP_NAME });
+  saveBlob(doc.output('blob'), exportName(ex, 'pdf'));
+  toast('PDF ready', `${body.length} task${body.length === 1 ? '' : 's'} in the report.`, 'green', icon.download);
+}
+
+// =====================================================================
+//  Calendar
+// =====================================================================
+const cal = { month: null, week: null, scope: 'all' };
+const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const dayOf = (iso) => new Date(iso + 'T00:00:00');
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const mondayOf = (d) => addDays(new Date(d.getFullYear(), d.getMonth(), d.getDate()), -((d.getDay() + 6) % 7));
+function calTasks() {
+  const mine = (t) => t.assigned_to === state.me.id, gave = (t) => t.created_by === state.me.id && !mine(t);
+  return state.tasks.filter((t) => t.due_date && (cal.scope === 'mine' ? mine(t) : cal.scope === 'assigned' ? gave(t) : (isAdmin() || mine(t) || gave(t))));
+}
+function calState(t) {
+  if (t.status === 'completed') return 'done';
+  const d = dueInfo(t)?.state;
+  return d === 'overdue' ? 'overdue' : d === 'today' ? 'today' : 'upcoming';
+}
+const CAL_LABEL = { overdue: 'Overdue', today: 'Due today', upcoming: 'Upcoming', done: 'Completed' };
+function calChip(t, { full = false } = {}) {
+  const st = calState(t), a = person(t.assigned_to);
+  const drag = canEditTask(t) && t.status !== 'completed';
+  const tip = `${t.title} · ${CAL_LABEL[st]}${t.due_time ? ' · ' + fmtTime(t.due_time) : ''} · ${a.id === state.me.id ? 'You' : a.full_name}`;
+  return `<button type="button" class="cal-chip cal-${st}" data-cal-task="${esc(t.id)}" ${drag ? 'draggable="true"' : ''} title="${esc(tip)}">
+    ${st === 'done' ? icon.check(12) : `<i class="cal-dot"></i>`}${t.due_time ? `<span class="cal-time">${esc(fmtTime(t.due_time))}</span>` : ''}<span class="cal-t">${esc(t.title)}</span>
+    ${full ? `<span class="cal-who">${avatar(a, 'xs')}${esc(a.id === state.me.id ? 'You' : a.full_name.split(' ')[0])}</span>` : ''}${t.repeat ? `<span class="cal-rep">${icon.repeat(11)}</span>` : ''}</button>`;
+}
+const byDueTime = (a, b) => (a.status === 'completed') - (b.status === 'completed') || (a.due_time || '99').localeCompare(b.due_time || '99') || a.title.localeCompare(b.title);
+
+function renderCalendar() {
+  const phone = matchMedia('(max-width: 640px)').matches;
+  const today = new Date(), todayIso = localToday();
+  cal.month ||= new Date(today.getFullYear(), today.getMonth(), 1);
+  cal.week ||= mondayOf(today);
+  if (cal.scope === 'assigned' && !isManager()) cal.scope = 'all';
+  const tasks = calTasks();
+  const byDay = {}; tasks.forEach((t) => (byDay[t.due_date] ||= []).push(t));
+  Object.values(byDay).forEach((l) => l.sort(byDueTime));
+  const scopes = [['all', isAdmin() ? 'Everyone' : 'All my tasks'], ['mine', 'Assigned to me'], ...(isManager() ? [['assigned', 'Assigned by me']] : [])];
+  const head = phone
+    ? `${cal.week.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${addDays(cal.week, 6).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
+    : cal.month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  // range shown, for the counters
+  let from, to;
+  if (phone) { from = cal.week; to = addDays(cal.week, 6); }
+  else { from = mondayOf(cal.month); const last = new Date(cal.month.getFullYear(), cal.month.getMonth() + 1, 0); to = addDays(mondayOf(last), 6); }
+  const inRange = tasks.filter((t) => t.due_date >= isoOf(from) && t.due_date <= isoOf(to));
+  const count = (k) => inRange.filter((t) => calState(t) === k).length;
+  const overdueAll = tasks.filter((t) => calState(t) === 'overdue').length;
+
+  let body;
+  if (!phone) {
+    const days = []; for (let d = new Date(from); d <= to; d = addDays(d, 1)) days.push(new Date(d));
+    const MAX = 3;
+    body = `<div class="cal-grid" role="grid" aria-label="${esc(head)}">
+      ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((w) => `<div class="cal-wd" role="columnheader">${w}</div>`).join('')}
+      ${days.map((d) => {
+        const iso = isoOf(d), list = byDay[iso] || [], out = d.getMonth() !== cal.month.getMonth();
+        return `<div class="cal-day ${out ? 'out' : ''} ${iso === todayIso ? 'today' : ''} ${iso < todayIso ? 'past' : ''} ${d.getDay() % 6 === 0 ? 'wkend' : ''}" data-day="${iso}" role="gridcell">
+          <div class="cal-num"><span>${d.getDate() === 1 ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : d.getDate()}</span>
+            <button type="button" class="cal-add" data-cal-add="${iso}" aria-label="New task on ${esc(fmtDate(iso))}" title="New task on this day">${icon.plus(14)}</button></div>
+          <div class="cal-list">${list.slice(0, MAX).map((t) => calChip(t)).join('')}
+            ${list.length > MAX ? `<button type="button" class="cal-more" data-cal-more="${iso}">+${list.length - MAX} more</button>` : ''}</div>
+        </div>`;
+      }).join('')}</div>`;
+  } else {
+    const days = []; for (let i = 0; i < 7; i++) days.push(addDays(cal.week, i));
+    body = `<div class="cal-agenda">${days.map((d) => {
+      const iso = isoOf(d), list = byDay[iso] || [];
+      return `<section class="ag-day ${iso === todayIso ? 'today' : ''} ${iso < todayIso ? 'past' : ''}" data-day="${iso}">
+        <header><b>${d.toLocaleDateString(undefined, { weekday: 'short' })}</b><span class="ag-num">${d.getDate()}</span>
+          <span class="muted small">${iso === todayIso ? 'Today' : d.toLocaleDateString(undefined, { month: 'short' })}</span>
+          <button type="button" class="cal-add" data-cal-add="${iso}" aria-label="New task on ${esc(fmtDate(iso))}">${icon.plus(16)}</button></header>
+        ${list.length ? `<div class="ag-list">${list.map((t) => calChip(t, { full: true })).join('')}</div>` : `<p class="ag-empty">Nothing due</p>`}
+      </section>`;
+    }).join('')}</div>`;
+  }
+
+  $('#view').innerHTML = `
+  <section class="content cal-page">
+    <div class="page-head"><div><h1>Calendar</h1><p>${phone ? 'Your week at a glance. Tap a task to open it.' : 'Tasks on their due dates. Drag a task to another day to move its due date.'}</p></div></div>
+    <div class="cal-bar">
+      <div class="cal-nav">
+        <button class="icon-btn" id="cal-prev" aria-label="${phone ? 'Previous week' : 'Previous month'}">${icon.chev(18)}</button>
+        <button class="btn" id="cal-today">Today</button>
+        <button class="icon-btn" id="cal-next" aria-label="${phone ? 'Next week' : 'Next month'}">${icon.chev(18)}</button>
+        <h2 class="cal-title">${esc(head)}</h2>
+      </div>
+      <div class="segmented" id="cal-scope">${scopes.map(([k, l]) => `<button class="${cal.scope === k ? 'active' : ''}" data-scope="${k}">${l}</button>`).join('')}</div>
+    </div>
+    <div class="cal-legend">
+      ${['overdue', 'today', 'upcoming', 'done'].map((k) => `<span class="cal-key cal-${k}"><i class="cal-dot"></i>${CAL_LABEL[k]} <b>${count(k)}</b></span>`).join('')}
+      ${overdueAll > count('overdue') ? `<button class="btn sm cal-jump" id="cal-overdue">${overdueAll} overdue in total</button>` : ''}
+    </div>
+    ${body}
+  </section>`;
+  bindCalendar(phone, byDay);
+}
+
+function bindCalendar(phone, byDay) {
+  const v = $('#view');
+  const move = (n) => { if (phone) cal.week = addDays(cal.week, 7 * n); else cal.month = new Date(cal.month.getFullYear(), cal.month.getMonth() + n, 1); renderCalendar(); };
+  $('#cal-prev').addEventListener('click', () => move(-1));
+  $('#cal-next').addEventListener('click', () => move(1));
+  $('#cal-today').addEventListener('click', () => { const t = new Date(); cal.month = new Date(t.getFullYear(), t.getMonth(), 1); cal.week = mondayOf(t); renderCalendar(); });
+  $$('#cal-scope button').forEach((b) => b.addEventListener('click', () => { cal.scope = b.dataset.scope; renderCalendar(); }));
+  $('#cal-overdue')?.addEventListener('click', () => {
+    const first = calTasks().filter((t) => calState(t) === 'overdue').sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
+    if (!first) return; const d = dayOf(first.due_date); cal.month = new Date(d.getFullYear(), d.getMonth(), 1); cal.week = mondayOf(d); renderCalendar();
+  });
+  v.onclick = (e) => {
+    const chip = e.target.closest('[data-cal-task]');
+    if (chip && v.contains(chip)) { openTask(byId(state.tasks, chip.dataset.calTask)); return; }
+    const more = e.target.closest('[data-cal-more]');
+    if (more) {
+      const iso = more.dataset.calMore;
+      openMenu(more, (byDay[iso] || []).map((t) => ({ label: t.title, hint: `${CAL_LABEL[calState(t)]}${t.due_time ? ' · ' + fmtTime(t.due_time) : ''} · ${person(t.assigned_to).full_name}`,
+        ic: calState(t) === 'done' ? icon.check : icon.circle, tone: { overdue: 'red', today: 'orange', upcoming: 'blue', done: 'green' }[calState(t)], onClick: () => openTask(byId(state.tasks, t.id)) })),
+        { title: dayOf(iso).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) });
+      return;
+    }
+    const add = e.target.closest('[data-cal-add]');
+    if (add) openTaskEditor(null, { due_date: add.dataset.calAdd });
+  };
+  if (phone) return;
+  // drag a task to another day
+  let dragId = null;
+  v.ondragstart = (e) => {
+    const c = e.target.closest?.('[data-cal-task]'); if (!c) return;
+    dragId = c.dataset.calTask; c.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', dragId); } catch {}
+    v.querySelector('.cal-grid')?.classList.add('is-dragging');
+  };
+  v.ondragend = () => { dragId = null; $$('.cal-chip.dragging, .cal-day.drop', v).forEach((x) => x.classList.remove('dragging', 'drop')); v.querySelector('.cal-grid')?.classList.remove('is-dragging'); };
+  $$('.cal-day', v).forEach((cell) => {
+    cell.addEventListener('dragover', (e) => { if (!dragId) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; cell.classList.add('drop'); });
+    cell.addEventListener('dragleave', (e) => { if (!cell.contains(e.relatedTarget)) cell.classList.remove('drop'); });
+    cell.addEventListener('drop', async (e) => {
+      e.preventDefault(); cell.classList.remove('drop');
+      const id = dragId || e.dataTransfer.getData('text/plain'); dragId = null;
+      await moveTaskTo(id, cell.dataset.day);
+    });
+  });
+}
+
+async function moveTaskTo(id, iso) {
+  const t = byId(state.tasks, id);
+  if (!t || t.due_date === iso) return;
+  if (!canEditTask(t)) { toast('Only the person who created this task can change its date', '', 'gray', icon.lock); return; }
+  const prev = t.due_date;
+  t.due_date = iso; renderCalendar();
+  try {
+    Object.assign(t, await store.updateTask(id, { due_date: iso }));
+    try { await syncReminders(t, state.me.id, reminderSelection(t.id, state.me.id)); } catch {}
+    const undo = async () => { try { t.due_date = prev; Object.assign(t, await store.updateTask(id, { due_date: prev })); await syncReminders(t, state.me.id, reminderSelection(t.id, state.me.id)).catch(() => {}); } catch (e) { fail(e); } if (location.hash === '#/calendar') renderCalendar(); };
+    toast('Due date moved', `"${t.title}" is now due ${fmtDate(iso)}.`, 'blue', icon.cal, { action: 'Undo', onAction: undo });
+  } catch (e) { t.due_date = prev; fail(e); renderCalendar(); }
+}
 
 // =====================================================================
 //  Reminders

@@ -177,13 +177,26 @@ export class SupabaseAdapter {
     return data;
   }
   async listTodos() { return this.personal(this.sb.from('todos').select('*').order('position')); }
-  async addTodo(title, position, task_id = null) {
-    const row = { title, position }; if (task_id) row.task_id = task_id;
+  async addTodo(title, position, task_id = null, list_id = null) {
+    const row = { title, position }; if (task_id) row.task_id = task_id; if (list_id) row.list_id = list_id;
     return this.personal(this.sb.from('todos').insert(row).select().single());
   }
   async updateTodo(id, patch) { return this.personal(this.sb.from('todos').update(patch).eq('id', id).select().single()); }
   async deleteTodo(id) { await this.personal(this.sb.from('todos').delete().eq('id', id)); }
   async clearDoneTodos() { await this.personal(this.sb.from('todos').delete().eq('done', true)); }
+  // ---------- to-do lists (migration 015) ----------
+  async listTodoLists() {
+    const { data, error } = await this.sb.from('todo_lists').select('*').order('position');
+    if (error) { if (/todo_lists|schema cache/i.test(error.message)) return null; throw new Error(error.message); }
+    return data;
+  }
+  async addTodoList(name) {
+    const { data, error } = await this.sb.from('todo_lists').insert({ name }).select().single();
+    if (error) throw new Error(/todo_lists|schema cache/i.test(error.message) ? 'Run supabase/migrations/015_lists_and_repeat.sql in Supabase first.' : error.message);
+    return data;
+  }
+  async updateTodoList(id, patch) { return unwrap(await this.sb.from('todo_lists').update(patch).eq('id', id).select().single()); }
+  async deleteTodoList(id) { unwrap(await this.sb.from('todo_lists').delete().eq('id', id)); }
   async listNotes() { return this.personal(this.sb.from('notes').select('*').order('updated_at', { ascending: false })); }
   async addNote(n = {}) { return this.personal(this.sb.from('notes').insert({ title: n.title || '', body: n.body || '' }).select().single()); }
   async updateNote(id, patch) { return this.personal(this.sb.from('notes').update(patch).eq('id', id).select().single()); }

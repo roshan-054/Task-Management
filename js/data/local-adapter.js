@@ -109,6 +109,7 @@ export class LocalAdapter {
     db.task_events ||= [];
     db.task_remarks ||= [];
     db.todos ||= [];
+    db.todo_lists ||= [];
     db.reminders ||= [];
     db.notes ||= [];
     if (!db.platforms) {   // demo data saved before platforms existed
@@ -393,10 +394,31 @@ export class LocalAdapter {
     }
     if (t.assigned_to !== old.assigned_to && t.assigned_to !== t.created_by)
       notes.push(this.notify(db, t.assigned_to, t, 'assigned', `${me.full_name} assigned you "${t.title}"`));
+    if (t.repeat && t.status === 'completed' && old.status !== 'completed' && !t.repeat_spawned) this.spawnNext(db, t);
     this.save(db);
     this.emit({ kind: 'task' });
     notes.forEach((n) => this.emit({ kind: 'notification', record: n }));
     return clone(t);
+  }
+  // Mirrors spawn_next_occurrence() in migrations/015_lists_and_repeat.sql.
+  spawnNext(db, t) {
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = iso(new Date());
+    const base = t.due_date || today;
+    const d = new Date(base + 'T00:00:00');
+    do {
+      if (t.repeat === 'daily') d.setDate(d.getDate() + 1);
+      else if (t.repeat === 'weekdays') d.setDate(d.getDate() + ({ 5: 3, 6: 2 }[d.getDay()] || 1));
+      else if (t.repeat === 'weekly') d.setDate(d.getDate() + 7);
+      else d.setMonth(d.getMonth() + 1);
+    } while (iso(d) <= today);
+    const n = { ...clone(t), id: uid(), status: 'not_started', due_date: t.due_date ? iso(d) : null, created_at: now(), updated_at: now(),
+      completed_at: null, started_at: null, repeat_parent: t.repeat_parent || t.id, repeat_spawned: false };
+    db.tasks.unshift(n);
+    t.repeat_spawned = true;
+    const shift = t.due_date ? (new Date(iso(d) + 'T00:00:00') - new Date(base + 'T00:00:00')) : 0;
+    (db.reminders || []).filter((r) => r.task_id === t.id && r.offset_minutes != null).forEach((r) =>
+      db.reminders.push({ ...r, id: uid(), task_id: n.id, sent_at: null, remind_at: new Date(new Date(r.remind_at).getTime() + shift).toISOString(), created_at: now() }));
   }
   async deleteTask(id) {
     const db = this.db; const me = this.me(db);
@@ -476,10 +498,27 @@ export class LocalAdapter {
 
   // ---------- personal to-do & notes (mirrors migrations/007_todos_notes.sql) ----------
   async listTodos() { const me = this.me(this.db); return clone(this.db.todos.filter((t) => t.user_id === me.id)).sort((a, b) => a.position - b.position); }
-  async addTodo(title, position, task_id = null) {
+  async listTodoLists() { const me = this.me(this.db); return clone(this.db.todo_lists.filter((l) => l.user_id === me.id)).sort((a, b) => a.position - b.position); }
+  async addTodoList(name) {
+    const db = this.db; const me = this.me(db);
+    name = (name || '').trim().slice(0, 80); if (!name) throw new Error('Give the list a name.');
+    const l = { id: uid(), user_id: me.id, name, position: Date.now() / 1000, created_at: now() };
+    db.todo_lists.push(l); this.save(db); return clone(l);
+  }
+  async updateTodoList(id, patch) {
+    const db = this.db; const me = this.me(db);
+    const l = db.todo_lists.find((x) => x.id === id && x.user_id === me.id); if (!l) throw new Error('Not found');
+    Object.assign(l, patch, { user_id: me.id }); this.save(db); return clone(l);
+  }
+  async deleteTodoList(id) {
+    const db = this.db; const me = this.me(db);
+    db.todo_lists = db.todo_lists.filter((x) => !(x.id === id && x.user_id === me.id));
+    db.todos = db.todos.filter((x) => !(x.list_id === id && x.user_id === me.id)); this.save(db);
+  }
+  async addTodo(title, position, task_id = null, list_id = null) {
     const db = this.db; const me = this.me(db);
     title = (title || '').trim(); if (!title) throw new Error('Write something first.');
-    const t = { id: uid(), user_id: me.id, title: title.slice(0, 300), done: false, pending: false, pending_note: '', pending_at: null, task_id, position: position ?? Date.now() / 1000, created_at: now(), done_at: null };
+    const t = { id: uid(), user_id: me.id, title: title.slice(0, 300), done: false, pending: false, pending_note: '', pending_at: null, task_id, list_id, position: position ?? Date.now() / 1000, created_at: now(), done_at: null };
     db.todos.push(t); this.save(db); return clone(t);
   }
   async updateTodo(id, patch) {

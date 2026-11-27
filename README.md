@@ -84,6 +84,7 @@ When a new version adds database changes, run the matching file in `supabase/mig
 | `012_kpi_visibility.sql` | Managers see performance only for themselves and the team members they manage (never other managers or admins); admins see everyone |
 | `013_temp_passwords.sql` | Admin-set passwords (Activate or Reset) are temporary: the person is asked to choose their own after signing in |
 | `014_fix_function_permissions.sql` | Repair: lets signed-in users run the helper functions the security rules use (fixes "permission denied for function is_admin") |
+| `015_lists_and_repeat.sql` | Several to-do lists per person (Google Tasks style) and repeating tasks (daily, weekdays, weekly, monthly): completing one creates the next |
 
 **Activating people from the panel with "Confirm email" on:** Supabase still sends them a confirmation email, and they must click it before their first sign-in. Supabase's built-in email service only sends a few emails per hour; if you add many people at once, set up custom SMTP under **Authentication → Emails**, or turn **Confirm email** off and use **Activate account now** when you add each person (so no invitation is left waiting for someone else to claim).
 
