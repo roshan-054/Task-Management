@@ -1340,12 +1340,12 @@ function openTaskEditor(t = null, prefill = {}) {
       const opts = platformsFor(assignee.department_id, data.platform_id);
       if (!opts.some((o) => o.id === chosenPlat)) chosenPlat = '';
       box.hidden = !opts.length;
-      box.innerHTML = opts.length ? `<label>Platform</label>
-        <div class="plat-pick" role="radiogroup" aria-label="Platform">
-          ${opts.map((o) => `<button type="button" role="radio" aria-checked="${o.id === chosenPlat}" class="${o.id === chosenPlat ? 'on' : ''}" data-plat="${esc(o.id)}">${icon.tag(13)}${esc(o.name)}${o.archived ? ' (removed)' : ''}</button>`).join('')}
-          <button type="button" role="radio" aria-checked="${!chosenPlat}" class="none ${chosenPlat ? '' : 'on'}" data-plat="">None</button>
-        </div>` : '';
-      $$('[data-plat]', box).forEach((b) => b.addEventListener('click', () => { chosenPlat = b.dataset.plat; renderPlat(); }));
+      box.innerHTML = opts.length ? `<label for="t-plat">Platform</label>
+        <select class="select" id="t-plat">
+          <option value="" ${chosenPlat ? '' : 'selected'}>None</option>
+          ${opts.map((o) => `<option value="${esc(o.id)}" ${o.id === chosenPlat ? 'selected' : ''}>${esc(o.name)}${o.archived ? ' (removed)' : ''}</option>`).join('')}
+        </select>` : '';
+      $('#t-plat', box)?.addEventListener('change', (e) => { chosenPlat = e.target.value; });
     };
     renderPlat();
     $$('.st-opt', ov).forEach((b) => b.addEventListener('click', () => {
