@@ -281,7 +281,17 @@ function enhanceSelect(sel) {
   btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); btn.click(); } });
   sync();
 }
-const enhanceSelects = (root) => { if (root.matches?.('select.select')) enhanceSelect(root); root.querySelectorAll?.('select.select').forEach(enhanceSelect); };
+// Multi-line boxes grow with their text (up to about half the screen, then scroll).
+function autoGrow(ta) {
+  if (!ta.isConnected) return;
+  ta.style.height = 'auto';
+  const max = Math.max(160, innerHeight * 0.5);
+  ta.style.height = Math.min(ta.scrollHeight + 2, max) + 'px';
+  ta.style.overflowY = ta.scrollHeight + 2 > max ? 'auto' : 'hidden';
+}
+document.addEventListener('input', (e) => { if (e.target.matches?.('textarea.textarea')) autoGrow(e.target); });
+const growAll = (root) => { const list = root.matches?.('textarea.textarea') ? [root] : [...(root.querySelectorAll?.('textarea.textarea') || [])]; if (list.length) requestAnimationFrame(() => list.forEach(autoGrow)); };
+const enhanceSelects = (root) => { growAll(root); if (root.matches?.('select.select')) enhanceSelect(root); root.querySelectorAll?.('select.select').forEach(enhanceSelect); };
 new MutationObserver((muts) => muts.forEach((mu) => mu.addedNodes.forEach((n) => { if (n.nodeType === 1) enhanceSelects(n); })))
   .observe(document.body, { childList: true, subtree: true });
 // A <label for="..."> pointing at an enhanced select focuses its button.

@@ -1472,3 +1472,5 @@ body.has-inline-new #new-task { display: none; }
 .link-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 #task-form .textarea, #task-form .input { min-width: 0; }
 .tcard-title { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+textarea.textarea { resize: none; overflow-y: hidden; transition: none; }
