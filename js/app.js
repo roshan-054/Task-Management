@@ -1302,23 +1302,22 @@ function openTaskEditor(t = null, prefill = {}) {
         <div class="st-seg" role="radiogroup" aria-labelledby="t-status-l">${STATUSES.map((x) => `<button type="button" role="radio" aria-checked="${x.id === data.status}" class="st-opt tone-${x.tone} ${x.id === data.status ? 'on' : ''}" data-st="${x.id}">${statusIcon[x.id](16)}<span>${x.label}</span></button>`).join('')}</div>
         <input type="hidden" id="t-status" value="${esc(data.status)}"></div>
       <div class="field"><label for="t-desc">Details</label><textarea class="textarea" id="t-desc" placeholder="Add context, steps or acceptance criteria">${esc(data.description)}</textarea></div>
-      <div class="field"><label for="t-assignee">Assign to</label>
+      <div class="row ap-row"><div class="field"><label for="t-assignee">Assign to</label>
         <select class="select" id="t-assignee" ${isManager() ? '' : 'disabled'}>${assigneeOptions(data.assigned_to)}</select>
         ${isManager() ? '' : '<span class="small muted">Team members can add tasks for themselves. Managers can assign to anyone.</span>'}</div>
-      <div class="field" id="plat-field" hidden></div>
+      <div class="field" id="plat-field" hidden></div></div>
       <div class="row">
         <div class="field"><label for="t-prio">Priority</label><select class="select" id="t-prio">${PRIORITIES.map((p) => `<option value="${p.id}" ${p.id === data.priority ? 'selected' : ''}>${p.label}</option>`).join('')}</select></div>
         <div class="field"><label for="t-due">Due date</label><input class="input" type="date" id="t-due" value="${esc(data.due_date || '')}"></div>
       </div>
       <div class="row">
         <div class="field"><label for="t-time">Time <span class="muted" style="font-weight:400">(optional)</span></label><input type="hidden" id="t-time" value="${esc(data.due_time || '')}"><div data-timepick></div></div>
-        <div class="field"></div>
-      </div>
-      <div class="field"><label for="t-repeat">${icon.repeat(14)} Repeat</label>
+        <div class="field"><label for="t-repeat">${icon.repeat(14)} Repeat</label>
         <select class="select" id="t-repeat" ${editing && t.created_by !== state.me.id && !isAdmin() ? 'disabled' : ''}>
           <option value="">Doesn't repeat</option>${Object.entries(REPEATS).map(([k, v]) => `<option value="${k}" ${data.repeat === k ? 'selected' : ''}>${v}</option>`).join('')}
         </select>
-        <span class="small muted" id="t-repeat-hint">${data.repeat ? 'When this is completed, the next one is created automatically with the next due date.' : 'For work that comes back, like a daily report.'}</span></div>
+        <span class="small muted" id="t-repeat-hint">${data.repeat ? 'Next one is created when this is completed.' : ''}</span></div>
+      </div>
       <div data-reminders></div>
       <div class="field"><label>Related links</label>
         <div id="links" style="display:grid;gap:8px">${(data.links || []).map(linkRow).join('')}</div>
@@ -1356,7 +1355,7 @@ function openTaskEditor(t = null, prefill = {}) {
       if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(e.key)) return; e.preventDefault();
       const bs = $$('.st-opt', ov); const i = bs.indexOf(document.activeElement); const n = bs[(i + (/Right|Down/.test(e.key) ? 1 : -1) + bs.length) % bs.length]; n.focus(); n.click();
     });
-    $('#t-repeat', ov).addEventListener('change', (e) => { $('#t-repeat-hint', ov).textContent = e.target.value ? 'When this is completed, the next one is created automatically with the next due date.' : 'For work that comes back, like a daily report.'; });
+    $('#t-repeat', ov).addEventListener('change', (e) => { $('#t-repeat-hint', ov).textContent = e.target.value ? 'Next one is created when this is completed.' : ''; });
     mountTimePicker($('[data-timepick]', ov), $('#t-time', ov));
     const rem = mountReminders($('[data-reminders]', ov), {
       task: t, getDue: () => ({ date: $('#t-due', ov).value || ($('#t-time', ov).value ? localToday() : ''), time: $('#t-time', ov).value }),

@@ -1454,3 +1454,21 @@ body.has-inline-new #new-task { display: none; }
 #task-form .sheet-foot .btn { padding: 7px 14px; font-size: 13px; }
 #task-form .tp-btn { height: 32px; font-size: 13.5px; }
 #task-form .field .small { font-size: 11.5px; }
+
+/* ---------- v25: narrower task editor, paired fields ---------- */
+.sheet:has(#task-form) { max-width: 540px; }
+#task-form .row { gap: 10px; }
+#task-form .ap-row:has(#plat-field[hidden]) { grid-template-columns: 1fr; }
+#task-form .task-summary .ts-people { grid-template-columns: 1fr 1fr; }
+#task-form .task-summary .ts-arrow { display: none; }
+#task-form #t-repeat-hint:empty { display: none; }
+
+/* ---------- v26: long words never stretch cards ---------- */
+.column, .col-body, .col-body > *, .card-grid > *, .tcard, .tl-card, .ag-day, .cal-day, .notif, .pgroup, .people-groups, .sheet-body > * { min-width: 0; }
+.col-body, .card-grid { grid-template-columns: minmax(0, 1fr); }
+.card-grid { grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); }
+.tcard-title, .task-desc, .todo-title, .notif p, .ts-v b, .tl-name, .note-title, .blocker, .remark-body, .r-table td, .fmenu-item .fm-label { overflow-wrap: anywhere; word-break: break-word; }
+.link-chip { max-width: 100%; min-width: 0; }
+.link-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#task-form .textarea, #task-form .input { min-width: 0; }
+.tcard-title { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
