@@ -1404,3 +1404,24 @@ body.has-inline-new #new-task { display: none; }
 :root[data-theme="dark"] .st-opt.on.tone-orange { background: var(--orange-soft) !important; color: var(--orange) !important; }
 :root[data-theme="dark"] .st-opt.on.tone-green { background: var(--green-soft) !important; color: var(--green) !important; }
 @media (max-width: 520px) { .st-seg { grid-template-columns: 1fr 1fr; } }
+
+/* ---------- v22: task summary in the editor, clearer labels ---------- */
+.task-summary { border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); padding: 14px; display: grid; gap: 12px; margin-bottom: 4px; }
+.ts-people { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; }
+.ts-arrow { color: var(--text-3); display: inline-flex; }
+.ts-who { display: grid; gap: 6px; min-width: 0; }
+.ts-k { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-2); }
+.ts-v { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ts-v .avatar { width: 34px; height: 34px; font-size: 13px; flex-shrink: 0; }
+.ts-v > span { display: grid; min-width: 0; }
+.ts-v b { font-size: 15px; font-weight: 650; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ts-v small { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ts-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ts-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+.ts-chip[class*="tone-"] { border-color: transparent; }
+.ts-chip.due-overdue { background: var(--red-soft); color: var(--red); border-color: transparent; }
+.ts-chip.due-today, .ts-chip.due-soon { background: var(--orange-soft); color: var(--orange); border-color: transparent; }
+.ts-chip.plat { background: var(--purple-soft); color: var(--purple); border-color: transparent; }
+.ts-meta { font-size: 12px; color: var(--text-2); }
+.field > label { font-weight: 650; color: var(--text); }
+@media (max-width: 520px) { .ts-people { grid-template-columns: 1fr; } .ts-arrow { display: none; } }

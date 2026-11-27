@@ -1275,11 +1275,28 @@ function linkRow(l = { label: '', url: '' }) {
     <button type="button" class="icon-btn" data-rm aria-label="Remove link">${icon.x(16)}</button></div>`;
 }
 
+// Highlighted key facts at the top of the task editor.
+function taskSummary(t) {
+  const by = person(t.created_by), to = person(t.assigned_to), st = statusOf(t.status), pr = prioOf(t.priority), pl = platformOf(t.platform_id), d = dueInfo(t);
+  const who = (k, p) => `<div class="ts-who"><span class="ts-k">${k}</span><span class="ts-v">${avatar(p)}<span><b>${esc(p.id === state.me.id ? p.full_name + ' (you)' : p.full_name)}</b>${p.title ? `<small>${esc(p.title)}</small>` : ''}</span></span></div>`;
+  return `<section class="task-summary" aria-label="Task summary">
+    <div class="ts-people">${who('Assigned by', by)}<span class="ts-arrow">${icon.send(16)}</span>${who('Assigned to', to)}</div>
+    <div class="ts-chips">
+      <span class="ts-chip tone-${st.tone}">${statusIcon[st.id](14)}${esc(st.label)}</span>
+      <span class="ts-chip tone-${pr.tone}">${esc(pr.label)} priority</span>
+      ${t.due_date ? `<span class="ts-chip ${d ? 'due-' + d.state : ''}">${icon.cal(14)}Due ${esc(fmtDate(t.due_date))}${t.due_time ? ', ' + esc(fmtTime(t.due_time)) : ''}${d && d.state !== 'ok' && d.state !== 'done' ? ` · ${esc(d.label)}` : ''}</span>` : `<span class="ts-chip">${icon.cal(14)}No due date</span>`}
+      ${pl ? `<span class="ts-chip plat">${icon.tag(14)}${esc(pl.name)}</span>` : ''}
+      ${t.repeat && REPEATS[t.repeat] ? `<span class="ts-chip">${icon.repeat(14)}${esc(REPEATS[t.repeat])}</span>` : ''}
+    </div>
+    <div class="ts-meta">Created ${esc(fmtDateTime(t.created_at))}${t.completed_at && t.status === 'completed' ? ` · Completed ${esc(fmtDateTime(t.completed_at))}` : ''}</div>
+  </section>`;
+}
 function openTaskEditor(t = null, prefill = {}) {
   const editing = !!t;
   const data = t || { title: '', description: '', priority: 'medium', status: 'not_started', due_date: '', links: [], platform_id: null, assigned_to: isManager() ? '' : state.me.id, ...prefill };
   openSheet(`${sheetHead(editing ? 'Edit task' : 'New task')}
     <form id="task-form" novalidate><div class="sheet-body">
+      ${editing ? taskSummary(t) : ''}
       <div class="field"><label for="t-title">Title</label><input class="input" id="t-title" maxlength="200" placeholder="What needs to be done?" value="${esc(data.title)}" required></div>
       <div class="field"><label id="t-status-l">Work status</label>
         <div class="st-seg" role="radiogroup" aria-labelledby="t-status-l">${STATUSES.map((x) => `<button type="button" role="radio" aria-checked="${x.id === data.status}" class="st-opt tone-${x.tone} ${x.id === data.status ? 'on' : ''}" data-st="${x.id}">${statusIcon[x.id](16)}<span>${x.label}</span></button>`).join('')}</div>
