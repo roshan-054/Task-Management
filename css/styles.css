@@ -1474,3 +1474,22 @@ body.has-inline-new #new-task { display: none; }
 .tcard-title { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
 textarea.textarea { resize: none; overflow-y: hidden; transition: none; }
+
+/* ---------- v28: removing notifications ---------- */
+.n-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn.danger-ghost { color: var(--red); }
+.btn.danger-ghost:hover { background: var(--red-soft); border-color: var(--red); }
+.notif-row { position: relative; }
+.notif-row .n-del, .notif .n-del { width: 28px; height: 28px; flex: none; color: var(--text-3); opacity: 0; transition: opacity .15s; }
+.notif-row:hover .n-del, .notif-row:focus-within .n-del, .notif:hover .n-del, .notif:focus-within .n-del { opacity: 1; }
+.n-del:hover { color: var(--red); background: var(--red-soft); }
+@media (hover: none) { .notif-row .n-del, .notif .n-del { opacity: 1; } }
+.notif-row.flash { animation: nflash 1.6s ease; }
+@keyframes nflash { 0%, 40% { box-shadow: 0 0 0 2px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.notif { align-items: flex-start; }
+.notif p { margin: 0; }
+.pop-actions { display: flex; gap: 4px; }
+.pop-list { max-height: min(60vh, 460px); overflow-y: auto; }
+.pop-all { display: block; width: 100%; border: 0; border-top: 1px solid var(--border); background: none; padding: 11px; font: inherit; font-size: 13px; font-weight: 600; color: var(--accent); cursor: pointer; border-radius: 0 0 12px 12px; }
+.pop-all:hover { background: var(--surface-2); }
+.popover { max-height: none; overflow: hidden; display: flex; flex-direction: column; }

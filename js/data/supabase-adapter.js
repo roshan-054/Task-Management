@@ -225,6 +225,10 @@ export class SupabaseAdapter {
   async listNotifications() {
     return unwrap(await this.sb.from('notifications').select('*').order('created_at', { ascending: false }).limit(50));
   }
+  async deleteNotifications(ids) {
+    if (!ids.length) return;
+    unwrap(await this.sb.from('notifications').delete().in('id', ids));
+  }
   async markNotificationsRead(ids) {
     if (!ids.length) return;
     unwrap(await this.sb.from('notifications').update({ read: true }).in('id', ids));

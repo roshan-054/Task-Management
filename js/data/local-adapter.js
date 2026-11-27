@@ -490,6 +490,10 @@ export class LocalAdapter {
     const db = this.db; const me = this.me(db);
     return clone(db.notifications.filter((n) => n.user_id === me.id).slice(0, 50));
   }
+  async deleteNotifications(ids) {
+    const db = this.db; const me = this.me(db);
+    db.notifications = db.notifications.filter((n) => !(n.user_id === me.id && ids.includes(n.id))); this.save(db);
+  }
   async markNotificationsRead(ids) {
     const db = this.db; const me = this.me(db);
     db.notifications.forEach((n) => { if (n.user_id === me.id && ids.includes(n.id)) n.read = true; });

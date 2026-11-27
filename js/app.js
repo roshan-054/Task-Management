@@ -669,6 +669,23 @@ async function markAllRead() {
   try { await store.markNotificationsRead(ids); } catch (e) { console.warn(e); }
 }
 let noteFilter = 'unread';
+// Remove notifications (only your own; the database enforces it).
+async function removeNotifications(ids) {
+  if (!ids.length) return;
+  const keep = state.notifications;
+  state.notifications = keep.filter((n) => !ids.includes(n.id));
+  updateCounts(); refreshNotifViews();
+  try { await store.deleteNotifications(ids); }
+  catch (e) { state.notifications = keep; updateCounts(); refreshNotifViews(); fail(e); }
+}
+function refreshNotifViews() { renderPopover(); if (location.hash === '#/notifications') renderNotificationsPage(); }
+async function clearNotifications(which) {
+  const ids = state.notifications.filter((n) => which === 'all' || n.read).map((n) => n.id);
+  if (!ids.length) return;
+  if (which === 'all' && !await confirmDialog({ title: 'Clear all notifications?', body: `${ids.length} notification${ids.length === 1 ? '' : 's'} will be removed. This can't be undone.`, confirm: 'Clear all' })) return;
+  await removeNotifications(ids);
+  toast(which === 'all' ? 'Notifications cleared' : 'Read notifications cleared', '', 'gray', icon.check);
+}
 function renderNotificationsPage() {
   const all = state.notifications;
   const unread = all.filter((n) => !n.read);
@@ -682,23 +699,31 @@ function renderNotificationsPage() {
   $('#view').innerHTML = `
   <section class="content narrow">
     <div class="page-head"><div><h1>Notifications</h1><p>Everything that needs your attention, newest first.</p></div>
-      ${unread.length ? `<button class="btn" id="n-readall">${icon.check(16)} Mark all as read</button>` : ''}</div>
+      <div class="n-actions">${unread.length ? `<button class="btn sm" id="n-readall">${icon.check(15)} Mark all as read</button>` : ''}
+        ${all.some((n) => n.read) ? `<button class="btn sm" id="n-clearread">${icon.trash(15)} Clear read</button>` : ''}
+        ${all.length ? `<button class="btn sm danger-ghost" id="n-clearall">${icon.trash(15)} Clear all</button>` : ''}</div></div>
     ${canAsk || muted ? `<div class="notice">${icon.bell(18)}<div>${canAsk ? 'Turn on desktop alerts so you see notifications even when this tab is in the background. ' : ''}${muted ? 'Notification sound is off. ' : ''}
       <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">${canAsk ? `<button class="btn sm primary" id="n-desk">Enable desktop alerts</button>` : ''}${muted ? `<button class="btn sm" id="n-sound">${icon.sound(14)} Turn sound on</button>` : ''}</div></div></div>` : ''}
     <div class="segmented" style="margin:14px 0 10px"><button class="${noteFilter === 'unread' ? 'active' : ''}" data-nf="unread">Unread<span class="n">${unread.length}</span></button><button class="${noteFilter === 'all' ? 'active' : ''}" data-nf="all">All<span class="n">${all.length}</span></button></div>
     <div class="card notif-page">${list.length ? list.map((n) => {
       const { tone, title, ic } = noteStyle(n.type);
       const d = day(n.created_at); const head = d !== lastDay ? `<div class="notif-day">${esc(d)}</div>` : ''; lastDay = d;
-      return `${head}<button class="notif-row ${n.read ? '' : 'unread'}" data-n="${esc(n.id)}" data-task="${esc(n.task_id || '')}">
+      return `${head}<div class="notif-row ${n.read ? '' : 'unread'} ${n.id === flashNote ? 'flash' : ''}" role="button" tabindex="0" data-n="${esc(n.id)}" data-task="${esc(n.task_id || '')}">
         <span class="ic tone-${tone}">${ic(18)}</span>
         <span class="nr-body"><b>${esc(title)}</b><span>${esc(n.message)}</span></span>
-        <time title="${esc(fmtDateTime(n.created_at))}">${esc(timeAgo(n.created_at))}</time>${n.read ? '' : '<span class="unread-dot"></span>'}</button>`;
+        <time title="${esc(fmtDateTime(n.created_at))}">${esc(timeAgo(n.created_at))}</time>${n.read ? '' : '<span class="unread-dot"></span>'}
+        <button type="button" class="icon-btn n-del" data-ndel="${esc(n.id)}" aria-label="Remove notification" title="Remove">${icon.x(15)}</button></div>`;
     }).join('') : `<div class="todo-empty">${icon.bell(28)}<b>You're all caught up</b><span>New notifications will show up here and in a banner at the top.</span></div>`}</div>
   </section>`;
   $$('[data-nf]').forEach((b) => b.addEventListener('click', () => { noteFilter = b.dataset.nf; renderNotificationsPage(); }));
   $('#n-readall')?.addEventListener('click', async () => { await markAllRead(); renderNotificationsPage(); });
+  $('#n-clearread')?.addEventListener('click', () => clearNotifications('read'));
+  $('#n-clearall')?.addEventListener('click', () => clearNotifications('all'));
+  $$('[data-ndel]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); removeNotifications([b.dataset.ndel]); }));
+  flashNote = null;
   $('#n-desk')?.addEventListener('click', async () => { await Notification.requestPermission(); renderNotificationsPage(); });
   $('#n-sound')?.addEventListener('click', () => { setMuted(false); chime('blue', { force: true }); renderShell(); route(); });
+  $$('.notif-row').forEach((r) => r.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === r) { e.preventDefault(); r.click(); } else if (e.key === 'Delete') removeNotifications([r.dataset.n]); }));
   $$('.notif-row').forEach((r) => r.addEventListener('click', async () => {
     const n = byId(state.notifications, r.dataset.n);
     if (n && !n.read) { n.read = true; updateCounts(); store.markNotificationsRead([n.id]).catch(() => {}); }
@@ -709,6 +734,7 @@ function renderNotificationsPage() {
 }
 
 // ---------- notifications popover ----------
+let flashNote = null;
 function closePopover() { $('.popover')?.remove(); }
 function togglePopover() {
   if ($('.popover')) return closePopover();
@@ -731,16 +757,25 @@ function renderPopover() {
   const ns = state.notifications;
   const canAsk = 'Notification' in window && Notification.permission === 'default';
   el.innerHTML = `
-    <div class="popover-head"><h3>Notifications</h3>${canAsk ? `<button class="btn ghost sm" id="desk">Enable desktop alerts</button>` : ''}</div>
-    ${ns.length ? ns.map((n) => {
+    <div class="popover-head"><h3>Notifications</h3>
+      <div class="pop-actions">${canAsk ? `<button class="btn ghost sm" id="desk">Desktop alerts</button>` : ''}${ns.length ? `<button class="btn ghost sm" id="pop-clear">Clear all</button>` : ''}</div></div>
+    <div class="pop-list">${ns.length ? ns.slice(0, 12).map((n) => {
       const { tone, ic } = noteStyle(n.type);
-      return `<div class="notif ${n.read ? '' : 'unread'}" data-task="${esc(n.task_id)}"><div class="ic tone-${tone}">${ic(16)}</div><div style="flex:1"><p>${esc(n.message)}</p><time>${esc(timeAgo(n.created_at))}</time></div></div>`;
-    }).join('') : `<div class="empty" style="padding:32px 16px"><div class="art">${icon.bell(28)}</div>You're all caught up.</div>`}`;
+      return `<div class="notif ${n.read ? '' : 'unread'}" role="button" tabindex="0" data-n="${esc(n.id)}" data-task="${esc(n.task_id || '')}"><div class="ic tone-${tone}">${ic(16)}</div><div style="flex:1;min-width:0"><p>${esc(n.message)}</p><time>${esc(timeAgo(n.created_at))}</time></div>
+        <button type="button" class="icon-btn n-del" data-ndel="${esc(n.id)}" aria-label="Remove notification" title="Remove">${icon.x(14)}</button></div>`;
+    }).join('') : `<div class="empty" style="padding:32px 16px"><div class="art">${icon.bell(28)}</div>You're all caught up.</div>`}</div>
+    <button class="pop-all" id="pop-all">View all notifications${ns.length > 12 ? ` (${ns.length})` : ''}</button>`;
   $('#desk', el)?.addEventListener('click', async () => { await Notification.requestPermission(); renderPopover(); });
+  $('#pop-clear', el)?.addEventListener('click', (e) => { e.stopPropagation(); clearNotifications('all'); });
+  $('#pop-all', el).addEventListener('click', () => { closePopover(); location.hash = '#/notifications'; });
+  $$('[data-ndel]', el).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); removeNotifications([b.dataset.ndel]); }));
   $$('.notif', el).forEach((n) => n.addEventListener('click', () => {
-    const t = byId(state.tasks, n.dataset.task);
+    // Open the Notifications page with this one highlighted, then its task.
     closePopover();
-    if (t) openTask(t); else toast('Task no longer available');
+    flashNote = n.dataset.n;
+    if (location.hash === '#/notifications') renderNotificationsPage(); else location.hash = '#/notifications';
+    const t = byId(state.tasks, n.dataset.task);
+    if (t) setTimeout(() => openTask(t), 120); else if (n.dataset.task) toast('Task no longer available');
   }));
 }
 
